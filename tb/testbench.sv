@@ -1,4 +1,17 @@
 `timescale 1ns / 1ps
 
-// Archivo auxiliar para mantener el mismo estilo de archivos del ejemplo.
-// El top de la jerarquia por capas esta en top.sv.
+`include "config.vh"
+
+`include "interface.sv"
+`include "stimulus.sv"
+`include "driver.sv"
+`include "env.sv"
+`include "test.sv"
+
+
+`include "darkpll.v"
+`include "darkuart.v"
+`include "darkriscv.v"
+`include "darksocv.v"
+
+`include "top.sv"

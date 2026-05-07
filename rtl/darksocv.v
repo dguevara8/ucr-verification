@@ -29,7 +29,7 @@
  */
 
 `timescale 1ns / 1ps
-`include "../rtl/config.vh"
+`include "config.vh"
 
 module darksocv
 (
@@ -101,6 +101,7 @@ module darksocv
 	 `elsif MODEL_TECH
 		  $readmemh("../../../../src/darksocv.mem",MEM);
     `else
+        #1;
         $readmemh("darksocv.mem",MEM,0);
     `endif
     end
