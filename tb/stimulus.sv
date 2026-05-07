@@ -81,9 +81,11 @@ class stimulus;
         add_r_instruction(7'b0000000, 3'b110); // or
         add_r_instruction(7'b0000000, 3'b111); // and
 
-        repeat (PROGRAM_SIZE - NUM_R_INSTRUCTIONS) begin
+        repeat (PROGRAM_SIZE - NUM_R_INSTRUCTIONS - 1) begin
             add_random_r_instruction();
         end
+
+        instructions.push_back(32'h0000006F); // jal x0, 0
     endtask
 
     // Imprime el programa generado para facilitar la depuracion.
