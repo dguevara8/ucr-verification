@@ -5,6 +5,7 @@
 `include "interface.sv"
 `include "stimulus.sv"
 `include "driver.sv"
+`include "monitor.sv"
 `include "env.sv"
 `include "test.sv"
 

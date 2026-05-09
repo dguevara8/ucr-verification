@@ -29,6 +29,13 @@ class stimulus;
         return {funct7, rs2, rs1, funct3, rd, 7'b0110011};
     endfunction
 
+    // Codifica una instruccion ADDI para cargar valores conocidos.
+    function logic [31:0] make_addi(logic [4:0] rd,
+                                    logic [4:0] rs1,
+                                    logic [11:0] imm);
+        return {imm, rs1, 3'b000, rd, 7'b0010011};
+    endfunction
+
     // Agrega la instruccion R usando los registros aleatorizados.
     task push_r_instruction(logic [6:0] funct7, logic [2:0] funct3);
         instructions.push_back(make_r_type(funct7, funct3, rd, rs1, rs2));
@@ -66,9 +73,20 @@ class stimulus;
         endcase
     endtask
 
+    // Inicializa los registros RV32E con valores conocidos.
+    // x1=1, x2=2, ..., x15=15.
+    task initialize_registers();
+        int i;
+
+        for (i = 1; i <= 15; i++) begin
+            instructions.push_back(make_addi(i[4:0], 5'd0, i[11:0]));
+        end
+    endtask
+
     // Construye un programa con todas las instrucciones tipo R soportadas.
     task build_program();
         instructions.delete();
+        initialize_registers();
 
         add_r_instruction(7'b0000000, 3'b000); // add
         add_r_instruction(7'b0100000, 3'b000); // sub

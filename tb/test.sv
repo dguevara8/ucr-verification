@@ -7,10 +7,11 @@ program testcase(ifc_darksocv ifc_darksocv_obj);
         $dumpfile("dump.vcd");
         $dumpvars(0);
 
-        env_obj.driver_obj.run();
+        env_obj.run();
 
-        // Tiempo simple de observacion despues de liberar reset.
-        repeat (200) @(posedge ifc_darksocv_obj.clk);
+        // Tiempo de observacion extendido para permitir que el core interno
+        // salga de reset y ejecute varias instrucciones antes de finalizar.
+        repeat (1000) @(posedge ifc_darksocv_obj.clk);
         $display("[TEST] Fin de la simulacion");
         $finish;
     end
