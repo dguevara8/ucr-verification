@@ -1,26 +1,35 @@
 class env;
 
-    virtual ifc_darksocv ifc;
+    virtual ifc_darksocv ifc_darksocv_obj;
 
     driver driver_obj;
     monitor monitor_obj;
     scoreboard scoreboard_obj;
 
-    function new(virtual ifc_darksocv ifc);
+    mailbox #(transaction) mon2scb;
 
-        this.ifc = ifc;
+    function new(virtual ifc_darksocv ifc_darksocv_obj);
+        $display("Ambiente: metodo creador del ambiente");
 
-        scoreboard_obj = new(); 
-        driver_obj     = new(ifc);
-        monitor_obj    = new(ifc, scoreboard_obj);
+        this.ifc_darksocv_obj = ifc_darksocv_obj;
 
+        mon2scb = new();
+
+        driver_obj = new(ifc_darksocv_obj);
+        monitor_obj = new(ifc_darksocv_obj, mon2scb);
+        scoreboard_obj = new(mon2scb);
     endfunction
 
     task run();
         fork
             driver_obj.run();
-            monitor_obj.check();
+            monitor_obj.run();
+            scoreboard_obj.run();
         join_none
     endtask
+
+    function void report();
+        scoreboard_obj.report();
+    endfunction
 
 endclass

@@ -3,10 +3,11 @@
 `include "config.vh"
 
 `include "interface.sv"
+`include "transaction.sv"
 `include "stimulus.sv"
-`include "scoreboard.sv"
-`include "monitor.sv"
 `include "driver.sv"
+`include "monitor.sv"
+`include "scoreboard.sv"
 `include "env.sv"
 `include "test.sv"
 
@@ -16,4 +17,5 @@
 `include "darkriscv.v"
 `include "darksocv.v"
 
+`include "checkers.sv"
 `include "top.sv"
