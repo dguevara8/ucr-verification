@@ -1,31 +1,43 @@
-module top ();
-
+module top();
     logic clk;
-    logic reset;
+
+    wire uart_tx;
+    wire uart_rx;
+    wire [3:0] led;
+    wire [3:0] debug;
+
+    assign uart_rx = 1'b1;
 
     initial begin
-        clk = 0;
+        clk = 1'b0;
         forever begin
-            #1 clk = ~clk;
+            #5 clk = ~clk;
         end
     end
-
-    ifc_ram ifc_ram_obj(clk);
   
-    // Instanciación del DUT
-    flip_flop_ram dut (
-        .clk       (clk),
-        .reset     (ifc_ram_obj.reset),
-        .wr_data   (ifc_ram_obj.wr_data),
-        .wr_en     (ifc_ram_obj.wr_en),
-        .wr_addr   (ifc_ram_obj.wr_addr),
-        .rd_data   (ifc_ram_obj.rd_data),
-        .rd_en     (ifc_ram_obj.rd_en),
-        .rd_addr   (ifc_ram_obj.rd_addr)
+  	initial begin
+    	ifc_darksocv_obj.reset = 1;
+    	#20;
+    	ifc_darksocv_obj.reset = 0;
+	end
+
+    ifc_darksocv ifc_darksocv_obj(clk);
+
+    // DUT principal del proyecto.
+    darksocv dut(
+        .XCLK(clk),
+        .XRES(ifc_darksocv_obj.reset),
+        .UART_RXD(uart_rx),
+        .UART_TXD(uart_tx),
+        .LED(led),
+        .DEBUG(debug)
     );
+  
+  	assign ifc_darksocv_obj.uart_rx = uart_rx;
+	assign ifc_darksocv_obj.uart_tx = uart_tx;
+	assign ifc_darksocv_obj.led     = led;
+	assign ifc_darksocv_obj.debug   = debug;
 
-    //Test case
-    testcase test(ifc_ram_obj);
-
-    //testcase test(ifc_ram_obj);
+    // Test case.
+    testcase test(ifc_darksocv_obj);
 endmodule
