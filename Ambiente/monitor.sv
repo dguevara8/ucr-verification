@@ -1,39 +1,70 @@
-//En este esquema de desarrollo vemos que el monitor es un 
-//Monitor-Checker.
+class monitor;
 
-class monitor #(
-    parameter FIFO_ROWS         = 256,                 // Número de entradas que tiene el FIFO
-    parameter FIFO_ROW_WIDTH    = 32,                  // Número de bits por entrada (ancho de bus)
-    parameter ADDR_WIDTH        = $clog2(FIFO_ROWS)    // Ancho de puntero calculado
-);
+    virtual ifc_darksocv ifc_darksocv_obj;
+    mailbox #(transaction) mon2scb;
 
-  //En este esquema es normal instanciar un scoreboard, pero lo que pasa es que
-  //se crea un puntero hacia el objeto real que está instanciado en el ambiente.
-  // De esta forma podemos comunicarnos con él y acceder a sus datos.
-  scoreboard scoreboard_obj;
-  virtual ifc_ram ifc_ram_obj;
-  logic [FIFO_ROW_WIDTH-1:0] read_word;
+    int cycle_count;
+    logic [31:0] last_pc;
+    logic [31:0] last_instr;
+    logic        last_reset;
+    logic        last_core_reset;
 
-  //Necesitamos una interfaz virtual para observar el "mundo RTL"
-  function new (virtual ifc_ram ifc_ram_obj, scoreboard scoreboard_obj);
-    this.scoreboard_obj = scoreboard_obj;
-    this.ifc_ram_obj = ifc_ram_obj;
-  endfunction
+    function new(virtual ifc_darksocv ifc_darksocv_obj,
+                 mailbox #(transaction) mon2scb);
+        this.ifc_darksocv_obj = ifc_darksocv_obj;
+        this.mon2scb = mon2scb;
 
-  //Usamos un task porque este método debe consumir tiempo
-  task check ();
-    forever begin
-      @(posedge ifc_ram_obj.clk);
-      if (ifc_ram_obj.rd_en) begin
-        $display("\nTiempo=%d || Monitor de lectura: Rd_en=1. Dirección de lectura %d", $time, ifc_ram_obj.rd_addr);
-        read_word = scoreboard_obj.SIM_MEMORY[ifc_ram_obj.rd_addr];
-        //Esperamos un ciclo de reloj porque el protocolo toma un ciclo en devolver el dato.
-        @(posedge ifc_ram_obj.clk);
-        #1;
-        $display("Tiempo %d || Monitor de lectura: El dato leído corresponde a %d", $time, ifc_ram_obj.rd_data);
-        if (ifc_ram_obj.rd_data != read_word) $display("Monitor de lectura: ERROR EL DATO NO COINCIDE. Teórico %d, Experimental %d", read_word, ifc_ram_obj.rd_data);
-        else $display("Tiempo %d || Monitor de lectura: El dato sí coincide. Teórico %d, Experimental %d", $time, read_word, ifc_ram_obj.rd_data);
-      end
-    end
-  endtask
+        cycle_count = 0;
+        last_pc = 32'hFFFF_FFFF;
+        last_instr = 32'hFFFF_FFFF;
+        last_reset = 1'b1;
+        last_core_reset = 1'b1;
+    endfunction
+
+    task run();
+        transaction tr;
+
+        forever begin
+            @(posedge ifc_darksocv_obj.clk);
+            cycle_count++;
+
+            if (ifc_darksocv_obj.reset == 1'b1) begin
+                if ((cycle_count <= 3) || (cycle_count % 5 == 0)) begin
+                    $display("[MONITOR] DUT en reset, ciclo=%0d, tiempo=%0t",
+                             cycle_count, $time);
+                end
+            end else begin
+                if (last_reset == 1'b1) begin
+                    $display("[MONITOR] reset liberado en tiempo=%0t", $time);
+                end
+
+                if ((last_core_reset == 1'b1) &&
+                    (ifc_darksocv_obj.core_reset == 1'b0)) begin
+                    $display("[MONITOR] core darkriscv salio de reset en tiempo=%0t", $time);
+                end
+
+                if (ifc_darksocv_obj.reg_write == 1'b1) begin
+                    tr = new();
+
+                    tr.cycle     = cycle_count;
+                    tr.pc        = ifc_darksocv_obj.pc;
+                    tr.instr     = ifc_darksocv_obj.instr;
+                    tr.rd        = ifc_darksocv_obj.rd;
+                    tr.wdata     = ifc_darksocv_obj.wdata;
+                    tr.reg_write = ifc_darksocv_obj.reg_write;
+                    tr.hlt       = ifc_darksocv_obj.hlt;
+                    tr.debug     = ifc_darksocv_obj.debug;
+
+                    tr.print("MONITOR");
+                    mon2scb.put(tr);
+                end
+            end
+
+            last_pc = ifc_darksocv_obj.pc;
+            last_instr = ifc_darksocv_obj.instr;
+            last_reset = ifc_darksocv_obj.reset;
+            last_core_reset = ifc_darksocv_obj.core_reset;
+        end
+    endtask
+
 endclass

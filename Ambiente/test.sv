@@ -1,20 +1,18 @@
-program testcase(ifc_ram ifc_ram_obj);
-  env env_obj = new(ifc_ram_obj);
+// Test principal del avance #1.
+program testcase(ifc_darksocv ifc_darksocv_obj);
+    env env_obj = new(ifc_darksocv_obj);
 
-  initial begin
-    env_obj.driver_obj.reset();
-    env_obj.driver_obj.write_random_data();
-    env_obj.driver_obj.write_random_data();
-    env_obj.driver_obj.read_data();
-    for (int i=0; i<256; i=i+1)begin
-      env_obj.driver_obj.write_data(i);
+    // Secuencia del test: usa el driver para crear y cargar el programa.
+    initial begin
+        $dumpfile("dump.vcd");
+        $dumpvars(0);
+
+        env_obj.run();
+
+        // Tiempo de observacion extendido para permitir que el core interno
+        // salga de reset y ejecute varias instrucciones antes de finalizar.
+        repeat (1000) @(posedge ifc_darksocv_obj.clk);
+        $display("[TEST] Fin de la simulacion");
+        $finish;
     end
-    for (int i=0; i<256; i=i+1)begin
-      env_obj.driver_obj.read_data(i);
-    end
-    for (int i=0; i<256; i=i+1)begin
-      $display("INSPECTOR ENV SCOREBOARD: Dato en fila %d es = %d", i, env_obj.scoreboard_obj.SIM_MEMORY[i]);
-    end
-  end
-  
 endprogram
