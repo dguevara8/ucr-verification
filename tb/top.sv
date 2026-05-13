@@ -16,7 +16,6 @@ module top();
     end
 
     ifc_darksocv ifc_darksocv_obj(clk);
-  	darksocv_checkers checkers_obj(ifc_darksocv_obj);
 
     // DUT principal del proyecto.
     darksocv dut(

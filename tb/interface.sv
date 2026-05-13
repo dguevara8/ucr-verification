@@ -13,5 +13,4 @@ interface ifc_darksocv(
     logic [3:0]  debug;
     logic        core_reset;
     logic        hlt;
-  
 endinterface
