@@ -8,6 +8,7 @@
 `include "driver.sv"
 `include "monitor.sv"
 `include "scoreboard.sv"
+`include "checkers.sv"
 `include "env.sv"
 `include "test.sv"
 
@@ -17,5 +18,4 @@
 `include "darkriscv.v"
 `include "darksocv.v"
 
-`include "checkers.sv"
 `include "top.sv"

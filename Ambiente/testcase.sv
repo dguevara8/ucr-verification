@@ -11,7 +11,7 @@ program testcase(ifc_darksocv ifc_darksocv_obj);
 
         repeat (2000) @(posedge ifc_darksocv_obj.clk);
 
-      	$display("[TEST] Fin de la simulacion");
+        $display("[TEST] Fin de la simulacion");
         $finish;
     end
 
