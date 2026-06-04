@@ -2,21 +2,22 @@
 // y controlar el reset externo del DUT.
 class driver;
 
-    // Objeto stimulus que genera el programa RISC-V.
     stimulus stimulus_obj;
 
-    // Interfaz virtual para acceder a clk y reset.
     virtual ifc_darksocv ifc_darksocv_obj;
 
-    // Constructor.
-    function new(virtual ifc_darksocv ifc_darksocv_obj);
+    // Mailbox para enviar las instrucciones generadas al monitor de instrucciones.
+    mailbox #(transaction) drv2imon;
+
+    function new(virtual ifc_darksocv ifc_darksocv_obj,
+                 mailbox #(transaction) drv2imon);
         this.ifc_darksocv_obj = ifc_darksocv_obj;
+        this.drv2imon = drv2imon;
     endfunction
 
-    // Crea el programa aleatorio tipo R que se va a cargar en memoria.
     task build_program();
 
-        $display("Driver: creando programa aleatorio tipo R");
+        $display("Driver: creando programa aleatorio tipo R/tipo I");
 
         stimulus_obj = new();
 
@@ -26,7 +27,33 @@ class driver;
 
     endtask
 
-    // Escribe una instruccion por linea en formato hexadecimal.
+    // Envia al instruction monitor las instrucciones antes de que el DUT las ejecute.
+    task publish_program_to_instruction_monitor();
+
+        transaction tr;
+
+        $display("\n[DRIVER] Enviando programa al monitor de instrucciones");
+
+        foreach (stimulus_obj.instructions[i]) begin
+            tr = new();
+
+            tr.cycle = i;
+            tr.pc = i * 4;
+            tr.instr = stimulus_obj.instructions[i];
+            tr.rd = stimulus_obj.instructions[i][11:7];
+            tr.wdata = 32'h00000000;
+            tr.reg_write = 1'b0;
+            tr.hlt = 1'b0;
+            tr.debug = 4'h0;
+
+            drv2imon.put(tr);
+
+            $display("[DRIVER] PRE_DUT instr[%0d] PC=%08h INSTR=%08h RD=x%0d",
+                     i, tr.pc, tr.instr, tr.rd);
+        end
+
+    endtask
+
     task write_mem_file();
 
         int fd;
@@ -48,7 +75,6 @@ class driver;
 
     endtask
 
-    // Imprime el contenido del archivo darksocv.mem.
     task print_mem_file();
 
         int fd;
@@ -71,7 +97,6 @@ class driver;
 
     endtask
 
-    // Carga el archivo generado dentro de la memoria interna del DUT.
     task load_mem_file();
 
         $display("\n[DRIVER] Cargando darksocv.mem en top.dut.MEM");
@@ -80,7 +105,6 @@ class driver;
 
     endtask
 
-    // Imprime el contenido cargado dentro de la memoria interna del DUT.
     task print_dut_mem();
 
         int i;
@@ -95,7 +119,6 @@ class driver;
 
     endtask
 
-    // Aplica reset durante varios ciclos y luego lo libera.
     task reset();
 
         $display("\n[DRIVER] Aplicando reset al DUT");
@@ -112,10 +135,11 @@ class driver;
 
     endtask
 
-    // Secuencia principal del driver.
     task run();
 
         build_program();
+
+        publish_program_to_instruction_monitor();
 
         write_mem_file();
 
