@@ -6,6 +6,7 @@ class riscv_sequence extends uvm_sequence #(riscv_transaction);
     localparam int PROGRAM_SIZE = 40;
     localparam int NUM_R_INSTRUCTIONS = 10;
     localparam int NUM_I_INSTRUCTIONS = 9;
+    localparam int NUM_U_INSTRUCTIONS = 2;
 
     randc logic [4:0] rd;
     randc logic [4:0] rs1;
@@ -66,6 +67,15 @@ class riscv_sequence extends uvm_sequence #(riscv_transaction);
     );
         return {funct7, shamt, rs1, funct3, rd, 7'b0010011};
     endfunction
+
+    // Codifica una instruccion tipo U: LUI o AUIPC.
+   	function logic [31:0] make_u_type(
+    	logic [19:0] imm20,
+    	logic [4:0] rd,
+    	logic [6:0] opcode
+	);
+    	return {imm20, rd, opcode};
+	endfunction
 
     task send_instr(logic [31:0] instr, int cycle);
         riscv_transaction item;
@@ -148,6 +158,23 @@ class riscv_sequence extends uvm_sequence #(riscv_transaction);
         cycle++;
     endtask
 
+    // Agrega una instruccion tipo U.
+    task add_u_instruction(logic [6:0] opcode, ref int cycle);
+    	logic [31:0] instr;
+    	logic [19:0] imm20;
+
+    	if (!std::randomize(rd, imm20) with {
+        	rd inside {[0:15]};
+        	imm20 inside {[20'h00001:20'h000ff]};
+    	}) begin
+        	`uvm_fatal(get_type_name(), "No se pudo aleatorizar la instruccion 	tipo U")
+    	end
+
+    	instr = make_u_type(imm20, rd, opcode);
+    	send_instr(instr, cycle);
+    	cycle++;
+	endtask
+
     // Agrega una instruccion R aleatoria entre las operaciones soportadas.
     task add_random_r_instruction(ref int cycle);
         logic [31:0] instr;
@@ -213,7 +240,10 @@ class riscv_sequence extends uvm_sequence #(riscv_transaction);
       add_shift_i_instruction(7'b0000000, 3'b101, cycle); // srli
       add_shift_i_instruction(7'b0100000, 3'b101, cycle); // srai
 
-        repeat (PROGRAM_SIZE - NUM_R_INSTRUCTIONS - NUM_I_INSTRUCTIONS - 1) begin
+      add_u_instruction(7'b0110111, cycle); // lui
+      add_u_instruction(7'b0010111, cycle); // auipc
+
+        repeat (PROGRAM_SIZE - NUM_R_INSTRUCTIONS - NUM_I_INSTRUCTIONS - NUM_I_INSTRUCTIONS - 1) begin
             add_random_r_instruction(cycle);
         end
 

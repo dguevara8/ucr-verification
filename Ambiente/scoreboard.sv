@@ -172,6 +172,8 @@ class riscv_scoreboard extends uvm_scoreboard;
         logic [31:0] imm_i;
         logic signed [31:0] s_rs1;
 
+        logic [31:0] imm_u;
+
         opcode = tr.instr[6:0];
         rd     = tr.instr[11:7];
         funct3 = tr.instr[14:12];
@@ -195,11 +197,25 @@ class riscv_scoreboard extends uvm_scoreboard;
         expected_imm = 32'h00000000;
         expected_uses_imm = 1'b0;
 
+        imm_i = {{20{tr.instr[31]}}, tr.instr[31:20]};
+        imm_u = {tr.instr[31:12], 12'b0};
+
         case (opcode)
+            7'b0110111: begin
+    					expected_op = "LUI";
+    					expected_uses_imm = 1'b1;
+    					expected_imm = imm_u;
+    					expected_wdata = imm_u;
+			end
+
+			7'b0010111: begin
+    					expected_op = "AUIPC";
+    					expected_uses_imm = 1'b1;
+    					expected_imm = imm_u;
+   						expected_wdata = tr.pc + imm_u;
+			end
 
             7'b0010011: begin
-                imm_i = {{20{tr.instr[31]}}, tr.instr[31:20]};
-
                 case (funct3)
                     3'b000: begin
                         expected_op = "ADDI";
@@ -427,6 +443,9 @@ class riscv_scoreboard extends uvm_scoreboard;
                     default: return "UNKNOWN";
                 endcase
             end
+
+            7'b0110111: return "LUI";
+			7'b0010111: return "AUIPC";
 
             default: return "UNKNOWN";
         endcase
