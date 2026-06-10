@@ -1,5 +1,8 @@
 // Clase encargada de construir un programa de prueba aleatorio para darkriscv.
-class stimulus;
+class riscv_stimulus extends uvm_sequence #(riscv_transaction);
+
+  `uvm_object_utils(riscv_stimulus)
+
     localparam int PROGRAM_SIZE = 40;
     localparam int NUM_R_INSTRUCTIONS = 10;
     localparam int NUM_I_INSTRUCTIONS = 9;
@@ -8,8 +11,6 @@ class stimulus;
     randc logic [4:0] rs1;
     randc logic [4:0] rs2;
     randc int unsigned instruction_id;
-
-    logic [31:0] instructions[$];
 
     constraint rv32e_registers {
         rd inside {[0:15]};
@@ -21,152 +22,206 @@ class stimulus;
         instruction_id inside {[0:NUM_R_INSTRUCTIONS-1]};
     }
 
+    function new(string name = "riscv_sequence");
+        super.new(name);
+    endfunction
+
     // Codifica una instruccion tipo R de RV32I/RV32E.
-    function logic [31:0] make_r_type(logic [6:0] funct7,
-                                      logic [2:0] funct3,
-                                      logic [4:0] rd,
-                                      logic [4:0] rs1,
-                                      logic [4:0] rs2);
+    function logic [31:0] make_r_type(
+        logic [6:0] funct7,
+        logic [2:0] funct3,
+        logic [4:0] rd,
+        logic [4:0] rs1,
+        logic [4:0] rs2
+    );
         return {funct7, rs2, rs1, funct3, rd, 7'b0110011};
     endfunction
 
     // Codifica una instruccion ADDI para cargar valores conocidos.
-    function logic [31:0] make_addi(logic [4:0] rd,
-                                    logic [4:0] rs1,
-                                    logic [11:0] imm);
+    function logic [31:0] make_addi(
+        logic [4:0] rd,
+        logic [4:0] rs1,
+        logic [11:0] imm
+    );
         return {imm, rs1, 3'b000, rd, 7'b0010011};
     endfunction
-
+  
     // Codifica una instruccion tipo I aritmetico-logica.
-    function logic [31:0] make_i_type(logic [2:0] funct3,
-                                      logic [4:0] rd,
-                                      logic [4:0] rs1,
-                                      logic [11:0] imm);
+    function logic [31:0] make_i_type(
+        logic [2:0] funct3,
+        logic [4:0] rd,
+        logic [4:0] rs1,
+        logic [11:0] imm
+    );
         return {imm, rs1, funct3, rd, 7'b0010011};
     endfunction
 
     // Codifica una instruccion tipo I de desplazamiento: SLLI, SRLI o SRAI.
-    function logic [31:0] make_shift_i_type(logic [6:0] funct7,
-                                            logic [2:0] funct3,
-                                            logic [4:0] rd,
-                                            logic [4:0] rs1,
-                                            logic [4:0] shamt);
+    function logic [31:0] make_shift_i_type(
+        logic [6:0] funct7,
+        logic [2:0] funct3,
+        logic [4:0] rd,
+        logic [4:0] rs1,
+        logic [4:0] shamt
+    );
         return {funct7, shamt, rs1, funct3, rd, 7'b0010011};
     endfunction
 
-    // Agrega la instruccion R usando los registros aleatorizados.
-    task push_r_instruction(logic [6:0] funct7, logic [2:0] funct3);
-        instructions.push_back(make_r_type(funct7, funct3, rd, rs1, rs2));
+    task send_instr(logic [31:0] instr, int cycle);
+        riscv_transaction item;
+
+        item = riscv_transaction::type_id::create("item");
+
+        start_item(item);
+
+        item.cycle     = cycle;
+        item.pc        = cycle * 4;
+        item.instr     = instr;
+        item.rd        = instr[11:7];
+        item.rs1       = instr[19:15];
+        item.rs2       = instr[24:20];
+        item.wdata     = 32'h00000000;
+        item.reg_write = 1'b0;
+        item.hlt       = 1'b0;
+        item.debug     = 4'h0;
+
+        finish_item(item);
+
+        `uvm_info(
+            get_type_name(),
+            $sformatf("instr[%0d] PC=%08h INSTR=%08h RD=x%0d",
+                      cycle, cycle * 4, instr, instr[11:7]),
+            UVM_MEDIUM
+        )
     endtask
 
     // Agrega una instruccion R con registros aleatorios validos para RV32E.
-    task add_r_instruction(logic [6:0] funct7, logic [2:0] funct3);
+    task add_r_instruction(logic [6:0] funct7, logic [2:0] funct3, ref int cycle);
+        logic [31:0] instr;
+
         if (!std::randomize(rd, rs1, rs2) with {
             rd inside {[0:15]};
             rs1 inside {[0:15]};
             rs2 inside {[0:15]};
         }) begin
-            $fatal(1, "[STIMULUS] No se pudieron aleatorizar los registros");
+            `uvm_fatal(get_type_name(), "No se pudieron aleatorizar los registros")
         end
-        push_r_instruction(funct7, funct3);
+
+        instr = make_r_type(funct7, funct3, rd, rs1, rs2);
+        send_instr(instr, cycle);
+        cycle++;
     endtask
 
-    // Agrega una instruccion tipo I con inmediato positivo pequeno.
+     // Agrega una instruccion tipo I con inmediato positivo pequeno.
     // Se usa rs2 como fuente aleatoria para formar el inmediato.
-    task add_i_instruction(logic [2:0] funct3);
+    task add_i_instruction(logic [2:0] funct3, ref int cycle);
+        logic [31:0] instr;
+
         if (!std::randomize(rd, rs1, rs2) with {
             rd inside {[0:15]};
             rs1 inside {[0:15]};
             rs2 inside {[0:15]};
         }) begin
-            $fatal(1, "[STIMULUS] No se pudieron aleatorizar los registros");
+            `uvm_fatal(get_type_name(), "No se pudieron aleatorizar los registros")
         end
 
-        instructions.push_back(make_i_type(funct3, rd, rs1, {7'b0000000, rs2}));
+        instr = make_i_type(funct3, rd, rs1, {7'b0000000, rs2});
+        send_instr(instr, cycle);
+        cycle++;
     endtask
 
     // Agrega una instruccion tipo I de desplazamiento con shamt valido.
     // rs2 se reutiliza como shamt porque esta limitado al rango 0..15.
-    task add_shift_i_instruction(logic [6:0] funct7, logic [2:0] funct3);
+    task add_shift_i_instruction(logic [6:0] funct7, logic [2:0] funct3, ref int cycle);
+        logic [31:0] instr;
+
         if (!std::randomize(rd, rs1, rs2) with {
             rd inside {[0:15]};
             rs1 inside {[0:15]};
             rs2 inside {[0:15]};
         }) begin
-            $fatal(1, "[STIMULUS] No se pudieron aleatorizar los registros");
+            `uvm_fatal(get_type_name(), "No se pudieron aleatorizar los registros")
         end
 
-        instructions.push_back(make_shift_i_type(funct7, funct3, rd, rs1, rs2));
+        instr = make_shift_i_type(funct7, funct3, rd, rs1, rs2);
+        send_instr(instr, cycle);
+        cycle++;
     endtask
 
     // Agrega una instruccion R aleatoria entre las operaciones soportadas.
-    task add_random_r_instruction();
+    task add_random_r_instruction(ref int cycle);
+        logic [31:0] instr;
+
         if (!randomize()) begin
-            $fatal(1, "[STIMULUS] No se pudo aleatorizar la instruccion R");
+            `uvm_fatal(get_type_name(), "No se pudo aleatorizar la instruccion R")
         end
 
         case (instruction_id)
-            0: push_r_instruction(7'b0000000, 3'b000); // add
-            1: push_r_instruction(7'b0100000, 3'b000); // sub
-            2: push_r_instruction(7'b0000000, 3'b001); // sll
-            3: push_r_instruction(7'b0000000, 3'b010); // slt
-            4: push_r_instruction(7'b0000000, 3'b011); // sltu
-            5: push_r_instruction(7'b0000000, 3'b100); // xor
-            6: push_r_instruction(7'b0000000, 3'b101); // srl
-            7: push_r_instruction(7'b0100000, 3'b101); // sra
-            8: push_r_instruction(7'b0000000, 3'b110); // or
-            9: push_r_instruction(7'b0000000, 3'b111); // and
+          0: instr = make_r_type(7'b0000000, 3'b000, rd, rs1, rs2); // add
+          1: instr = make_r_type(7'b0100000, 3'b000, rd, rs1, rs2); // sub
+          2: instr = make_r_type(7'b0000000, 3'b001, rd, rs1, rs2); // sll
+          3: instr = make_r_type(7'b0000000, 3'b010, rd, rs1, rs2); // slt
+          4: instr = make_r_type(7'b0000000, 3'b011, rd, rs1, rs2); // sltu
+          5: instr = make_r_type(7'b0000000, 3'b100, rd, rs1, rs2); // xor
+          6: instr = make_r_type(7'b0000000, 3'b101, rd, rs1, rs2); // srl
+          7: instr = make_r_type(7'b0100000, 3'b101, rd, rs1, rs2); // sra
+          8: instr = make_r_type(7'b0000000, 3'b110, rd, rs1, rs2); // or
+          9: instr = make_r_type(7'b0000000, 3'b111, rd, rs1, rs2); // and
         endcase
+
+        send_instr(instr, cycle);
+        cycle++;
     endtask
 
-    // Inicializa los registros RV32E con valores conocidos.
-    // x1=1, x2=2, ..., x15=15.
-    task initialize_registers();
-        int i;
-
-        for (i = 1; i <= 15; i++) begin
-            instructions.push_back(make_addi(i[4:0], 5'd0, i[11:0]));
+  	// Inicializa los registros RV32E con valores conocidos.
+    task initialize_registers(ref int cycle);
+        for (int i = 1; i <= 15; i++) begin
+            send_instr(make_addi(i[4:0], 5'd0, i[11:0]), cycle);
+            cycle++;
         end
     endtask
 
     // Construye un programa con instrucciones tipo R y tipo I soportadas.
-    task build_program();
-        instructions.delete();
-        initialize_registers();
+    task body();
+        int cycle;
 
-        add_r_instruction(7'b0000000, 3'b000); // add
-        add_r_instruction(7'b0100000, 3'b000); // sub
-        add_r_instruction(7'b0000000, 3'b001); // sll
-        add_r_instruction(7'b0000000, 3'b010); // slt
-        add_r_instruction(7'b0000000, 3'b011); // sltu
-        add_r_instruction(7'b0000000, 3'b100); // xor
-        add_r_instruction(7'b0000000, 3'b101); // srl
-        add_r_instruction(7'b0100000, 3'b101); // sra
-        add_r_instruction(7'b0000000, 3'b110); // or
-        add_r_instruction(7'b0000000, 3'b111); // and
+        cycle = 0;
 
-        add_i_instruction(3'b000); // addi
-        add_i_instruction(3'b010); // slti
-        add_i_instruction(3'b011); // sltiu
-        add_i_instruction(3'b100); // xori
-        add_i_instruction(3'b110); // ori
-        add_i_instruction(3'b111); // andi
-        add_shift_i_instruction(7'b0000000, 3'b001); // slli
-        add_shift_i_instruction(7'b0000000, 3'b101); // srli
-        add_shift_i_instruction(7'b0100000, 3'b101); // srai
+        `uvm_info(get_type_name(), "Generando programa aleatorio tipo R/tipo I", UVM_MEDIUM)
+
+        initialize_registers(cycle);
+
+      add_r_instruction(7'b0000000, 3'b000, cycle); // add
+      add_r_instruction(7'b0100000, 3'b000, cycle); // sub
+      add_r_instruction(7'b0000000, 3'b001, cycle); // sll
+      add_r_instruction(7'b0000000, 3'b010, cycle); // slt
+      add_r_instruction(7'b0000000, 3'b011, cycle); // sltu
+      add_r_instruction(7'b0000000, 3'b100, cycle); // xor
+      add_r_instruction(7'b0000000, 3'b101, cycle); // srl
+      add_r_instruction(7'b0100000, 3'b101, cycle); // sra
+      add_r_instruction(7'b0000000, 3'b110, cycle); // or
+      add_r_instruction(7'b0000000, 3'b111, cycle); // and
+
+      add_i_instruction(3'b000, cycle); // addi
+      add_i_instruction(3'b010, cycle); // slti
+      add_i_instruction(3'b011, cycle); // sltiu
+      add_i_instruction(3'b100, cycle); // xori
+      add_i_instruction(3'b110, cycle); // ori
+      add_i_instruction(3'b111, cycle); // andi
+
+      add_shift_i_instruction(7'b0000000, 3'b001, cycle); // slli
+      add_shift_i_instruction(7'b0000000, 3'b101, cycle); // srli
+      add_shift_i_instruction(7'b0100000, 3'b101, cycle); // srai
 
         repeat (PROGRAM_SIZE - NUM_R_INSTRUCTIONS - NUM_I_INSTRUCTIONS - 1) begin
-            add_random_r_instruction();
+            add_random_r_instruction(cycle);
         end
 
-        instructions.push_back(32'h0000006F); // jal x0, 0
+        send_instr(32'h0000006F, cycle); // jal x0, 0
+
+        `uvm_info(get_type_name(),
+                  $sformatf("Programa generado con %0d instrucciones", cycle + 1),
+                  UVM_LOW)
     endtask
 
-    // Imprime el programa generado para facilitar la depuracion.
-    task print_program();
-        $display("[STIMULUS] Programa aleatorio tipo R/tipo I generado:");
-        foreach (instructions[i]) begin
-            $display("[STIMULUS] instr[%0d] = %08h", i, instructions[i]);
-        end
-    endtask
 endclass

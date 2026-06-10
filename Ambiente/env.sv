@@ -1,49 +1,26 @@
-class env;
+class riscv_env extends uvm_env;
 
-    virtual ifc_darksocv ifc_darksocv_obj;
+    `uvm_component_utils(riscv_env)
 
-    driver driver_obj;
-    instruction_monitor instruction_monitor_obj;
-    monitor monitor_obj;
-    scoreboard scoreboard_obj;
-    riscv_checker checker_obj;
+    riscv_agent      agent_obj;
+    riscv_scoreboard scoreboard_obj;
 
-    mailbox #(transaction) drv2imon;
-    mailbox #(transaction) imon2scb;
-    mailbox #(transaction) scb2chk;
-    mailbox #(transaction) mon2chk;
-
-    function new(virtual ifc_darksocv ifc_darksocv_obj);
-
-        $display("Ambiente: metodo creador del ambiente");
-
-        this.ifc_darksocv_obj = ifc_darksocv_obj;
-
-        drv2imon = new();
-        imon2scb = new();
-        scb2chk = new();
-        mon2chk = new();
-
-        driver_obj = new(ifc_darksocv_obj, drv2imon);
-        instruction_monitor_obj = new(drv2imon, imon2scb);
-        monitor_obj = new(ifc_darksocv_obj, mon2chk);
-        scoreboard_obj = new(imon2scb, scb2chk);
-        checker_obj = new(mon2chk, scb2chk);
-
+    function new(string name = "riscv_env", uvm_component parent = null);
+        super.new(name, parent);
     endfunction
 
-    task run();
-        fork
-            driver_obj.run();
-            instruction_monitor_obj.run();
-            scoreboard_obj.run();
-            monitor_obj.run();
-            checker_obj.run();
-        join_none
-    endtask
+    virtual function void build_phase(uvm_phase phase);
+        super.build_phase(phase);
 
-    function void report();
-        checker_obj.report();
+        agent_obj = riscv_agent::type_id::create("agent_obj", this);
+        scoreboard_obj = riscv_scoreboard::type_id::create("scoreboard_obj", this);
+    endfunction
+
+    virtual function void connect_phase(uvm_phase phase);
+        super.connect_phase(phase);
+
+        agent_obj.driver_obj.drv2imon_port.connect(scoreboard_obj.expected_imp);
+        agent_obj.monitor_obj.mon2scb_port.connect(scoreboard_obj.actual_imp);
     endfunction
 
 endclass

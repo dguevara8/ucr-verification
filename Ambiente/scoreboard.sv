@@ -1,7 +1,14 @@
-class scoreboard;
-  
-  	mailbox #(transaction) imon2scb;
-    mailbox #(transaction) scb2chk;
+`uvm_analysis_imp_decl(_expected)
+`uvm_analysis_imp_decl(_actual)
+
+class riscv_scoreboard extends uvm_scoreboard;
+
+    `uvm_component_utils(riscv_scoreboard)
+
+    uvm_analysis_imp_expected #(riscv_transaction, riscv_scoreboard) expected_imp;
+    uvm_analysis_imp_actual   #(riscv_transaction, riscv_scoreboard) actual_imp;
+
+    riscv_transaction expected_q[$];
 
     logic [31:0] reg_model [32];
 
@@ -17,11 +24,19 @@ class scoreboard;
     logic [31:0] expected_imm;
     bit          expected_uses_imm;
 
-  function new(mailbox #(transaction) imon2scb,
-                 mailbox #(transaction) scb2chk);
-        this.imon2scb = imon2scb;
-        this.scb2chk = scb2chk;
-      
+    int pass_count;
+    int fail_count;
+
+    function new(string name = "riscv_scoreboard", uvm_component parent = null);
+        super.new(name, parent);
+    endfunction
+
+    virtual function void build_phase(uvm_phase phase);
+        super.build_phase(phase);
+
+        expected_imp = new("expected_imp", this);
+        actual_imp   = new("actual_imp", this);
+
         foreach (reg_model[i]) begin
             reg_model[i] = 32'h00000000;
         end
@@ -37,41 +52,113 @@ class scoreboard;
         expected_rs2_val = 32'h00000000;
         expected_imm = 32'h00000000;
         expected_uses_imm = 1'b0;
+
+        pass_count = 0;
+        fail_count = 0;
     endfunction
-  
-  	task run();
 
-        transaction instr_tr;
-        transaction expected_tr;
+    // Equivalente a: imon2scb.get(instr_tr)
+    virtual function void write_expected(riscv_transaction instr_tr);
+        riscv_transaction expected_tr;
 
-        forever begin
-            imon2scb.get(instr_tr);
+        calculate_expected(instr_tr);
 
-            calculate_expected(instr_tr);
+        if (expected_valid && (expected_rd != 5'd0)) begin
+            expected_tr = riscv_transaction::type_id::create("expected_tr");
 
-            if (expected_valid && (expected_rd != 5'd0)) begin
-                expected_tr = new();
+            expected_tr.cycle     = instr_tr.cycle;
+            expected_tr.pc        = instr_tr.pc;
+            expected_tr.instr     = instr_tr.instr;
+            expected_tr.rd        = expected_rd;
+            expected_tr.rs1       = instr_tr.rs1;
+            expected_tr.rs2       = instr_tr.rs2;
+            expected_tr.wdata     = expected_wdata;
+            expected_tr.reg_write = 1'b1;
+            expected_tr.hlt       = 1'b0;
+            expected_tr.debug     = 4'h0;
 
-                expected_tr.cycle = instr_tr.cycle;
-                expected_tr.pc = instr_tr.pc;
-                expected_tr.instr = instr_tr.instr;
-                expected_tr.rd = expected_rd;
-                expected_tr.wdata = expected_wdata;
-                expected_tr.reg_write = 1'b1;
-                expected_tr.hlt = 1'b0;
-                expected_tr.debug = 4'h0;
+            expected_q.push_back(expected_tr);
+        end
+        else if (expected_valid && (expected_rd == 5'd0)) begin
+            `uvm_info(
+                get_type_name(),
+                $sformatf("OP=%s RD=x0 -> modelo mantiene x0=0, no se envia writeback esperado",
+                          expected_op),
+                UVM_MEDIUM
+            )
+        end
+    endfunction
 
-                scb2chk.put(expected_tr);
-            end
-            else if (expected_valid && (expected_rd == 5'd0)) begin
-                $display("[SCOREBOARD] OP=%s RD=x0 -> modelo mantiene x0=0, no se envia writeback esperado al checker",
-                         expected_op);
-            end
+    // Equivalente a checker.run(): compara expected contra actual.
+    virtual function void write_actual(riscv_transaction actual_tr);
+        riscv_transaction expected_tr;
+        string op_name;
+
+        if (expected_q.size() == 0) begin
+            `uvm_error(
+                get_type_name(),
+                $sformatf("Writeback inesperado del DUT PC=%08h INSTR=%08h RD=x%0d WDATA=%0d",
+                          actual_tr.pc,
+                          actual_tr.instr,
+                          actual_tr.rd,
+                          $signed(actual_tr.wdata))
+            )
+            fail_count++;
+            return;
         end
 
-    endtask
+        expected_tr = expected_q.pop_front();
+        op_name = get_op_name(expected_tr.instr);
 
-    function void calculate_expected(transaction tr);
+        if (actual_tr.pc !== expected_tr.pc) begin
+            `uvm_error(
+                get_type_name(),
+                $sformatf("FAIL OP=%s DUT_PC=%08h EXPECTED_PC=%08h -> PC INCORRECTO",
+                          op_name,
+                          actual_tr.pc,
+                          expected_tr.pc)
+            )
+            fail_count++;
+        end
+        else if (actual_tr.rd !== expected_tr.rd) begin
+            `uvm_error(
+                get_type_name(),
+                $sformatf("FAIL OP=%s PC=%08h DUT_RD=x%0d EXPECTED_RD=x%0d -> REGISTRO DESTINO INCORRECTO",
+                          op_name,
+                          actual_tr.pc,
+                          actual_tr.rd,
+                          expected_tr.rd)
+            )
+            fail_count++;
+        end
+        else if (actual_tr.wdata !== expected_tr.wdata) begin
+            `uvm_error(
+                get_type_name(),
+                $sformatf("FAIL OP=%s PC=%08h RD=x%0d DUT=%0d EXPECTED=%0d -> INCORRECTO",
+                          op_name,
+                          actual_tr.pc,
+                          actual_tr.rd,
+                          $signed(actual_tr.wdata),
+                          $signed(expected_tr.wdata))
+            )
+            fail_count++;
+        end
+        else begin
+            `uvm_info(
+                get_type_name(),
+                $sformatf("PASS OP=%s PC=%08h RD=x%0d DUT=%0d EXPECTED=%0d -> CORRECTO",
+                          op_name,
+                          actual_tr.pc,
+                          actual_tr.rd,
+                          $signed(actual_tr.wdata),
+                          $signed(expected_tr.wdata)),
+                UVM_LOW
+            )
+            pass_count++;
+        end
+    endfunction
+
+    function void calculate_expected(riscv_transaction tr);
 
         logic [6:0] opcode;
         logic [6:0] funct7;
@@ -110,8 +197,8 @@ class scoreboard;
 
         case (opcode)
 
-                7'b0010011: begin
-                  imm_i = {{20{tr.instr[31]}}, tr.instr[31:20]};
+            7'b0010011: begin
+                imm_i = {{20{tr.instr[31]}}, tr.instr[31:20]};
 
                 case (funct3)
                     3'b000: begin
@@ -254,30 +341,41 @@ class scoreboard;
 
         if (expected_valid) begin
             if (expected_uses_imm) begin
-                $display("[SCOREBOARD] OP=%s RD=x%0d RS1=x%0d(%0d) IMM=%0d EXPECTED=%0d",
-                         expected_op,
-                         expected_rd,
-                         expected_rs1,
-                         $signed(expected_rs1_val),
-                         $signed(expected_imm),
-                         $signed(expected_wdata));
+                `uvm_info(
+                    get_type_name(),
+                    $sformatf("OP=%s RD=x%0d RS1=x%0d(%0d) IMM=%0d EXPECTED=%0d",
+                              expected_op,
+                              expected_rd,
+                              expected_rs1,
+                              $signed(expected_rs1_val),
+                              $signed(expected_imm),
+                              $signed(expected_wdata)),
+                    UVM_MEDIUM
+                )
             end else begin
-                $display("[SCOREBOARD] OP=%s RD=x%0d RS1=x%0d(%0d) RS2=x%0d(%0d) EXPECTED=%0d",
-                         expected_op,
-                         expected_rd,
-                         expected_rs1,
-                         $signed(expected_rs1_val),
-                         expected_rs2,
-                         $signed(expected_rs2_val),
-                         $signed(expected_wdata));
+                `uvm_info(
+                    get_type_name(),
+                    $sformatf("OP=%s RD=x%0d RS1=x%0d(%0d) RS2=x%0d(%0d) EXPECTED=%0d",
+                              expected_op,
+                              expected_rd,
+                              expected_rs1,
+                              $signed(expected_rs1_val),
+                              expected_rs2,
+                              $signed(expected_rs2_val),
+                              $signed(expected_wdata)),
+                    UVM_MEDIUM
+                )
             end
         end else begin
-            $display("[SCOREBOARD] INSTRUCCION NO SOPORTADA PC=%08h INSTR=%08h",
-                     tr.pc,
-                     tr.instr);
+            `uvm_info(
+                get_type_name(),
+                $sformatf("INSTRUCCION NO SOPORTADA PC=%08h INSTR=%08h",
+                          tr.pc,
+                          tr.instr),
+                UVM_MEDIUM
+            )
         end
 
-        // El modelo se actualiza con el valor esperado, no con el valor del DUT.
         if (expected_valid && (rd != 5'd0)) begin
             reg_model[rd] = expected_wdata;
         end
@@ -286,7 +384,60 @@ class scoreboard;
 
     endfunction
 
+    function string get_op_name(logic [31:0] instr);
+        logic [6:0] opcode;
+        logic [6:0] funct7;
+        logic [2:0] funct3;
+
+        opcode = instr[6:0];
+        funct3 = instr[14:12];
+        funct7 = instr[31:25];
+
+        case (opcode)
+            7'b0010011: begin
+                case (funct3)
+                    3'b000: return "ADDI";
+                    3'b010: return "SLTI";
+                    3'b011: return "SLTIU";
+                    3'b100: return "XORI";
+                    3'b110: return "ORI";
+                    3'b111: return "ANDI";
+                    3'b001: return (funct7 == 7'b0000000) ? "SLLI" : "UNKNOWN";
+                    3'b101: begin
+                        if (funct7 == 7'b0000000) return "SRLI";
+                        else if (funct7 == 7'b0100000) return "SRAI";
+                        else return "UNKNOWN";
+                    end
+                    default: return "UNKNOWN";
+                endcase
+            end
+
+            7'b0110011: begin
+                case ({funct7, funct3})
+                    {7'b0000000, 3'b000}: return "ADD";
+                    {7'b0100000, 3'b000}: return "SUB";
+                    {7'b0000000, 3'b001}: return "SLL";
+                    {7'b0000000, 3'b010}: return "SLT";
+                    {7'b0000000, 3'b011}: return "SLTU";
+                    {7'b0000000, 3'b100}: return "XOR";
+                    {7'b0000000, 3'b101}: return "SRL";
+                    {7'b0100000, 3'b101}: return "SRA";
+                    {7'b0000000, 3'b110}: return "OR";
+                    {7'b0000000, 3'b111}: return "AND";
+                    default: return "UNKNOWN";
+                endcase
+            end
+
+            default: return "UNKNOWN";
+        endcase
+    endfunction
+
+    virtual function void report_phase(uvm_phase phase);
+        `uvm_info(get_type_name(), "================ SCOREBOARD REPORT ================", UVM_LOW)
+        `uvm_info(get_type_name(), $sformatf("PASS: %0d", pass_count), UVM_LOW)
+        `uvm_info(get_type_name(), $sformatf("FAIL: %0d", fail_count), UVM_LOW)
+        `uvm_info(get_type_name(), "===================================================", UVM_LOW)
+    endfunction
+
 endclass
-
-
 
