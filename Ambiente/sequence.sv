@@ -1,7 +1,7 @@
 // Clase encargada de construir un programa de prueba aleatorio para darkriscv.
-class riscv_stimulus extends uvm_sequence #(riscv_transaction);
+class riscv_sequence extends uvm_sequence #(riscv_transaction);
 
-  `uvm_object_utils(riscv_stimulus)
+  `uvm_object_utils(riscv_sequence)
 
     localparam int PROGRAM_SIZE = 40;
     localparam int NUM_R_INSTRUCTIONS = 10;

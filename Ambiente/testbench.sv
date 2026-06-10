@@ -7,11 +7,12 @@ import uvm_pkg::*;
 `include "interface.sv"
 `include "transaction.sv"
 `include "sequencer.sv"
-`include "stimulus.sv"
+`include "sequence.sv"
 `include "driver.sv"
 `include "monitor.sv"
 `include "agent.sv"
 `include "scoreboard.sv"
+`include "subscriber.sv"
 `include "env.sv"
 `include "test.sv"
 
