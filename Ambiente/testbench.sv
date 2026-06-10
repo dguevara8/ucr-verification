@@ -7,6 +7,7 @@
 `include "stimulus.sv"
 `include "driver.sv"
 `include "monitor.sv"
+`include "premonitor.sv"
 `include "scoreboard.sv"
 `include "checkers.sv"
 `include "env.sv"

@@ -1,7 +1,8 @@
 // Clase encargada de construir un programa de prueba aleatorio para darkriscv.
 class stimulus;
-    localparam int PROGRAM_SIZE = 20;
+    localparam int PROGRAM_SIZE = 40;
     localparam int NUM_R_INSTRUCTIONS = 10;
+    localparam int NUM_I_INSTRUCTIONS = 9;
 
     randc logic [4:0] rd;
     randc logic [4:0] rs1;
@@ -11,7 +12,7 @@ class stimulus;
     logic [31:0] instructions[$];
 
     constraint rv32e_registers {
-        rd inside {[1:15]};
+        rd inside {[0:15]};
         rs1 inside {[0:15]};
         rs2 inside {[0:15]};
     }
@@ -36,6 +37,23 @@ class stimulus;
         return {imm, rs1, 3'b000, rd, 7'b0010011};
     endfunction
 
+    // Codifica una instruccion tipo I aritmetico-logica.
+    function logic [31:0] make_i_type(logic [2:0] funct3,
+                                      logic [4:0] rd,
+                                      logic [4:0] rs1,
+                                      logic [11:0] imm);
+        return {imm, rs1, funct3, rd, 7'b0010011};
+    endfunction
+
+    // Codifica una instruccion tipo I de desplazamiento: SLLI, SRLI o SRAI.
+    function logic [31:0] make_shift_i_type(logic [6:0] funct7,
+                                            logic [2:0] funct3,
+                                            logic [4:0] rd,
+                                            logic [4:0] rs1,
+                                            logic [4:0] shamt);
+        return {funct7, shamt, rs1, funct3, rd, 7'b0010011};
+    endfunction
+
     // Agrega la instruccion R usando los registros aleatorizados.
     task push_r_instruction(logic [6:0] funct7, logic [2:0] funct3);
         instructions.push_back(make_r_type(funct7, funct3, rd, rs1, rs2));
@@ -44,13 +62,41 @@ class stimulus;
     // Agrega una instruccion R con registros aleatorios validos para RV32E.
     task add_r_instruction(logic [6:0] funct7, logic [2:0] funct3);
         if (!std::randomize(rd, rs1, rs2) with {
-            rd inside {[1:15]};
+            rd inside {[0:15]};
             rs1 inside {[0:15]};
             rs2 inside {[0:15]};
         }) begin
             $fatal(1, "[STIMULUS] No se pudieron aleatorizar los registros");
         end
         push_r_instruction(funct7, funct3);
+    endtask
+
+    // Agrega una instruccion tipo I con inmediato positivo pequeno.
+    // Se usa rs2 como fuente aleatoria para formar el inmediato.
+    task add_i_instruction(logic [2:0] funct3);
+        if (!std::randomize(rd, rs1, rs2) with {
+            rd inside {[0:15]};
+            rs1 inside {[0:15]};
+            rs2 inside {[0:15]};
+        }) begin
+            $fatal(1, "[STIMULUS] No se pudieron aleatorizar los registros");
+        end
+
+        instructions.push_back(make_i_type(funct3, rd, rs1, {7'b0000000, rs2}));
+    endtask
+
+    // Agrega una instruccion tipo I de desplazamiento con shamt valido.
+    // rs2 se reutiliza como shamt porque esta limitado al rango 0..15.
+    task add_shift_i_instruction(logic [6:0] funct7, logic [2:0] funct3);
+        if (!std::randomize(rd, rs1, rs2) with {
+            rd inside {[0:15]};
+            rs1 inside {[0:15]};
+            rs2 inside {[0:15]};
+        }) begin
+            $fatal(1, "[STIMULUS] No se pudieron aleatorizar los registros");
+        end
+
+        instructions.push_back(make_shift_i_type(funct7, funct3, rd, rs1, rs2));
     endtask
 
     // Agrega una instruccion R aleatoria entre las operaciones soportadas.
@@ -83,7 +129,7 @@ class stimulus;
         end
     endtask
 
-    // Construye un programa con todas las instrucciones tipo R soportadas.
+    // Construye un programa con instrucciones tipo R y tipo I soportadas.
     task build_program();
         instructions.delete();
         initialize_registers();
@@ -99,7 +145,17 @@ class stimulus;
         add_r_instruction(7'b0000000, 3'b110); // or
         add_r_instruction(7'b0000000, 3'b111); // and
 
-        repeat (PROGRAM_SIZE - NUM_R_INSTRUCTIONS - 1) begin
+        add_i_instruction(3'b000); // addi
+        add_i_instruction(3'b010); // slti
+        add_i_instruction(3'b011); // sltiu
+        add_i_instruction(3'b100); // xori
+        add_i_instruction(3'b110); // ori
+        add_i_instruction(3'b111); // andi
+        add_shift_i_instruction(7'b0000000, 3'b001); // slli
+        add_shift_i_instruction(7'b0000000, 3'b101); // srli
+        add_shift_i_instruction(7'b0100000, 3'b101); // srai
+
+        repeat (PROGRAM_SIZE - NUM_R_INSTRUCTIONS - NUM_I_INSTRUCTIONS - 1) begin
             add_random_r_instruction();
         end
 
@@ -108,7 +164,7 @@ class stimulus;
 
     // Imprime el programa generado para facilitar la depuracion.
     task print_program();
-        $display("[STIMULUS] Programa aleatorio tipo R generado:");
+        $display("[STIMULUS] Programa aleatorio tipo R/tipo I generado:");
         foreach (instructions[i]) begin
             $display("[STIMULUS] instr[%0d] = %08h", i, instructions[i]);
         end

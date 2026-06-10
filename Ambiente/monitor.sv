@@ -21,6 +21,80 @@ class monitor;
         last_core_reset = 1'b1;
     endfunction
 
+    function string get_op_name(logic [31:0] instr);
+
+        logic [6:0] opcode;
+        logic [6:0] funct7;
+        logic [2:0] funct3;
+
+        opcode = instr[6:0];
+        funct3 = instr[14:12];
+        funct7 = instr[31:25];
+
+        case (opcode)
+            7'b0010011: begin
+                case (funct3)
+                    3'b000: return "ADDI";
+                    3'b010: return "SLTI";
+                    3'b011: return "SLTIU";
+                    3'b100: return "XORI";
+                    3'b110: return "ORI";
+                    3'b111: return "ANDI";
+
+                    3'b001: begin
+                      if (funct7 == 7'b0000000) return "SLLI";
+                        else return "UNKNOWN";
+                    end
+
+                    3'b101: begin
+                      if (funct7 == 7'b0000000) return "SRLI";
+                      else if (funct7 == 7'b0100000) return "SRAI";
+                        else return "UNKNOWN";
+                    end
+
+                    default: return "UNKNOWN";
+                endcase
+            end
+
+            7'b0110011: begin
+                case ({funct7, funct3})
+                    {7'b0000000, 3'b000}: return "ADD";
+                    {7'b0100000, 3'b000}: return "SUB";
+                    {7'b0000000, 3'b001}: return "SLL";
+                    {7'b0000000, 3'b010}: return "SLT";
+                    {7'b0000000, 3'b011}: return "SLTU";
+                    {7'b0000000, 3'b100}: return "XOR";
+                    {7'b0000000, 3'b101}: return "SRL";
+                    {7'b0100000, 3'b101}: return "SRA";
+                    {7'b0000000, 3'b110}: return "OR";
+                    {7'b0000000, 3'b111}: return "AND";
+                    default: return "UNKNOWN";
+                endcase
+            end
+
+            default: return "UNKNOWN";
+        endcase
+
+    endfunction
+
+    function bit instr_has_rd(logic [31:0] instr);
+
+        logic [6:0] opcode;
+
+        opcode = instr[6:0];
+
+        case (opcode)
+            7'b0010011: return 1'b1; // ADDI
+            7'b0110011: return 1'b1; // Tipo R
+            default:    return 1'b0;
+        endcase
+
+    endfunction
+
+    function logic [4:0] get_instr_rd(logic [31:0] instr);
+        return instr[11:7];
+    endfunction
+
     task run();
         transaction tr;
 
@@ -55,8 +129,27 @@ class monitor;
                     tr.hlt       = ifc_darksocv_obj.hlt;
                     tr.debug     = ifc_darksocv_obj.debug;
 
-                    tr.print("MONITOR");
+                    $display("[MONITOR] OBSERVADO ciclo=%0d PC=%08h INSTR=%08h OP=%s RD=x%0d DUT_WDATA=%0d WE=%0b HLT=%0b DBG=%0b",
+                             cycle_count,
+                             ifc_darksocv_obj.pc,
+                             ifc_darksocv_obj.instr,
+                             get_op_name(ifc_darksocv_obj.instr),
+                             ifc_darksocv_obj.rd,
+                             $signed(ifc_darksocv_obj.wdata),
+                             ifc_darksocv_obj.reg_write,
+                             ifc_darksocv_obj.hlt,
+                             ifc_darksocv_obj.debug);
+
                     mon2scb.put(tr);
+                end
+                else if (instr_has_rd(ifc_darksocv_obj.instr) &&
+                         (get_instr_rd(ifc_darksocv_obj.instr) == 5'd0)) begin
+                    $display("[MONITOR] OBSERVADO ciclo=%0d PC=%08h INSTR=%08h OP=%s RD=x0 WE=%0b -> rd=0; x0 no genera escritura arquitectonica",
+                             cycle_count,
+                             ifc_darksocv_obj.pc,
+                             ifc_darksocv_obj.instr,
+                             get_op_name(ifc_darksocv_obj.instr),
+                             ifc_darksocv_obj.reg_write);
                 end
             end
 
