@@ -32,9 +32,21 @@ class base_test extends uvm_test;
 
       	// Tiempo de observacion extendido para permitir que el core interno
         // salga de reset y ejecute varias instrucciones antes de finalizar.
-        repeat (1000) @(posedge ifc_darksocv_obj.clk);
+        // Si el DUT pide terminar antes, se imprime el resumen antes del $finish del RTL.
+        fork
+            begin
+                repeat (3000) @(posedge ifc_darksocv_obj.clk);
+            end
+            begin
+                wait (ifc_darksocv_obj.finish_req === 1'b1);
+                `uvm_info(get_type_name(), "[TEST] DUT solicito fin de simulacion", UVM_LOW)
+            end
+        join_any
+        disable fork;
 
       `uvm_info(get_type_name(), "[TEST] Fin de la simulacion", UVM_LOW)
+
+        env_obj.scoreboard_obj.print_fail_summary("base_test run_phase");
 
         phase.drop_objection(this);
     endtask

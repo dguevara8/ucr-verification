@@ -3,14 +3,17 @@ class riscv_sequence extends uvm_sequence #(riscv_transaction);
 
   `uvm_object_utils(riscv_sequence)
 
-    localparam int PROGRAM_SIZE = 40;
+    localparam int PROGRAM_SIZE = 80;
     localparam int NUM_R_INSTRUCTIONS = 10;
     localparam int NUM_I_INSTRUCTIONS = 9;
-    localparam int NUM_U_INSTRUCTIONS = 2;
+    localparam int NUM_U_RANDOM_INSTRUCTIONS = 2;
+    localparam int NUM_U_DIRECTED_INSTRUCTIONS = 8;
+    localparam int NUM_RANDOM_INSTRUCTIONS = NUM_R_INSTRUCTIONS + NUM_I_INSTRUCTIONS + NUM_U_RANDOM_INSTRUCTIONS;
 
     randc logic [4:0] rd;
     randc logic [4:0] rs1;
     randc logic [4:0] rs2;
+    rand logic [19:0] imm20;
     randc int unsigned instruction_id;
 
     constraint rv32e_registers {
@@ -19,8 +22,8 @@ class riscv_sequence extends uvm_sequence #(riscv_transaction);
         rs2 inside {[0:15]};
     }
 
-    constraint r_instruction_range {
-        instruction_id inside {[0:NUM_R_INSTRUCTIONS-1]};
+    constraint instruction_range {
+        instruction_id inside {[0:NUM_RANDOM_INSTRUCTIONS-1]};
     }
 
     function new(string name = "riscv_sequence");
@@ -69,13 +72,13 @@ class riscv_sequence extends uvm_sequence #(riscv_transaction);
     endfunction
 
     // Codifica una instruccion tipo U: LUI o AUIPC.
-   	function logic [31:0] make_u_type(
-    	logic [19:0] imm20,
-    	logic [4:0] rd,
-    	logic [6:0] opcode
-	);
-    	return {imm20, rd, opcode};
-	endfunction
+    function logic [31:0] make_u_type(
+        logic [6:0] opcode,
+        logic [4:0] rd,
+        logic [19:0] imm20
+    );
+        return {imm20, rd, opcode};
+    endfunction
 
     task send_instr(logic [31:0] instr, int cycle);
         riscv_transaction item;
@@ -158,29 +161,38 @@ class riscv_sequence extends uvm_sequence #(riscv_transaction);
         cycle++;
     endtask
 
-    // Agrega una instruccion tipo U.
+    // Agrega una instruccion tipo U con inmediato aleatorio.
     task add_u_instruction(logic [6:0] opcode, ref int cycle);
-    	logic [31:0] instr;
-    	logic [19:0] imm20;
+        logic [31:0] instr;
 
-    	if (!std::randomize(rd, imm20) with {
-        	rd inside {[0:15]};
-        	imm20 inside {[20'h00001:20'h000ff]};
-    	}) begin
-        	`uvm_fatal(get_type_name(), "No se pudo aleatorizar la instruccion 	tipo U")
-    	end
+        if (!std::randomize(rd, imm20) with {
+            rd inside {[0:15]};
+        }) begin
+            `uvm_fatal(get_type_name(), "No se pudo aleatorizar la instruccion tipo U")
+        end
 
-    	instr = make_u_type(imm20, rd, opcode);
-    	send_instr(instr, cycle);
-    	cycle++;
-	endtask
+        instr = make_u_type(opcode, rd, imm20);
+        send_instr(instr, cycle);
+        cycle++;
+    endtask
 
-    // Agrega una instruccion R aleatoria entre las operaciones soportadas.
-    task add_random_r_instruction(ref int cycle);
+    // Agrega una instruccion tipo U con inmediato conocido para cobertura dirigida.
+    task add_u_instruction_fixed(
+        logic [6:0] opcode,
+        logic [4:0] fixed_rd,
+        logic [19:0] fixed_imm20,
+        ref int cycle
+    );
+        send_instr(make_u_type(opcode, fixed_rd, fixed_imm20), cycle);
+        cycle++;
+    endtask
+
+    // Agrega una instruccion aleatoria entre las operaciones tipo R, I y U soportadas.
+    task add_random_instruction(ref int cycle);
         logic [31:0] instr;
 
         if (!randomize()) begin
-            `uvm_fatal(get_type_name(), "No se pudo aleatorizar la instruccion R")
+            `uvm_fatal(get_type_name(), "No se pudo aleatorizar la instruccion R/I/U")
         end
 
         case (instruction_id)
@@ -194,6 +206,23 @@ class riscv_sequence extends uvm_sequence #(riscv_transaction);
           7: instr = make_r_type(7'b0100000, 3'b101, rd, rs1, rs2); // sra
           8: instr = make_r_type(7'b0000000, 3'b110, rd, rs1, rs2); // or
           9: instr = make_r_type(7'b0000000, 3'b111, rd, rs1, rs2); // and
+          10: instr = make_i_type(3'b000, rd, rs1, {7'b0000000, rs2}); // addi
+          11: instr = make_i_type(3'b010, rd, rs1, {7'b0000000, rs2}); // slti
+          12: instr = make_i_type(3'b011, rd, rs1, {7'b0000000, rs2}); // sltiu
+          13: instr = make_i_type(3'b100, rd, rs1, {7'b0000000, rs2}); // xori
+          14: instr = make_i_type(3'b110, rd, rs1, {7'b0000000, rs2}); // ori
+          15: instr = make_i_type(3'b111, rd, rs1, {7'b0000000, rs2}); // andi
+          16: instr = make_shift_i_type(7'b0000000, 3'b001, rd, rs1, rs2); // slli
+          17: instr = make_shift_i_type(7'b0000000, 3'b101, rd, rs1, rs2); // srli
+          18: instr = make_shift_i_type(7'b0100000, 3'b101, rd, rs1, rs2); // srai
+          19: instr = make_u_type(7'b0110111, rd, imm20); // lui
+          20: instr = make_u_type(7'b0010111, rd, imm20); // auipc
+          default: begin
+              `uvm_fatal(
+                  get_type_name(),
+                  $sformatf("instruction_id fuera de rango: %0d", instruction_id)
+              )
+          end
         endcase
 
         send_instr(instr, cycle);
@@ -208,13 +237,19 @@ class riscv_sequence extends uvm_sequence #(riscv_transaction);
         end
     endtask
 
-    // Construye un programa con instrucciones tipo R y tipo I soportadas.
+    // Construye un programa con instrucciones tipo R, tipo I y tipo U soportadas.
     task body();
         int cycle;
 
         cycle = 0;
 
-        `uvm_info(get_type_name(), "Generando programa aleatorio tipo R/tipo I", UVM_MEDIUM)
+        `uvm_info(
+            get_type_name(),
+            $sformatf("Generando programa aleatorio tipo R/tipo I/tipo U: init=15 programa=%0d total=%0d",
+                      PROGRAM_SIZE,
+                      PROGRAM_SIZE + 15),
+            UVM_MEDIUM
+        )
 
         initialize_registers(cycle);
 
@@ -240,11 +275,17 @@ class riscv_sequence extends uvm_sequence #(riscv_transaction);
       add_shift_i_instruction(7'b0000000, 3'b101, cycle); // srli
       add_shift_i_instruction(7'b0100000, 3'b101, cycle); // srai
 
-      add_u_instruction(7'b0110111, cycle); // lui
-      add_u_instruction(7'b0010111, cycle); // auipc
+      add_u_instruction_fixed(7'b0110111, 5'd1, 20'h00000, cycle); // lui, imm zero
+      add_u_instruction_fixed(7'b0110111, 5'd2, 20'h00010, cycle); // lui, imm low
+      add_u_instruction_fixed(7'b0110111, 5'd3, 20'h00100, cycle); // lui, imm mid
+      add_u_instruction_fixed(7'b0110111, 5'd4, 20'h01000, cycle); // lui, imm high
+      add_u_instruction_fixed(7'b0010111, 5'd5, 20'h00000, cycle); // auipc, imm zero
+      add_u_instruction_fixed(7'b0010111, 5'd6, 20'h00010, cycle); // auipc, imm low
+      add_u_instruction_fixed(7'b0010111, 5'd7, 20'h00100, cycle); // auipc, imm mid
+      add_u_instruction_fixed(7'b0010111, 5'd8, 20'h01000, cycle); // auipc, imm high
 
-        repeat (PROGRAM_SIZE - NUM_R_INSTRUCTIONS - NUM_I_INSTRUCTIONS - NUM_I_INSTRUCTIONS - 1) begin
-            add_random_r_instruction(cycle);
+        repeat (PROGRAM_SIZE - NUM_R_INSTRUCTIONS - NUM_I_INSTRUCTIONS - NUM_U_DIRECTED_INSTRUCTIONS - 1) begin
+            add_random_instruction(cycle);
         end
 
         send_instr(32'h0000006F, cycle); // jal x0, 0

@@ -8,6 +8,8 @@ class riscv_subscriber extends uvm_subscriber #(riscv_transaction);
     logic [4:0] rd;
     logic [4:0] rs1;
     logic [4:0] rs2;
+    logic [1:0] instr_format;
+    logic [19:0] imm_u;
     logic       reg_write;
     logic       hlt;
     logic [3:0] debug;
@@ -16,16 +18,22 @@ class riscv_subscriber extends uvm_subscriber #(riscv_transaction);
     covergroup riscv_cg;
         option.per_instance = 1;
 
-        // Tipo general de instruccion observado en writeback.
+        // Instrucciones R, I y U generadas por la secuencia.
         cp_opcode: coverpoint opcode {
             bins r_type = {7'b0110011};
             bins i_type = {7'b0010011};
             bins lui    = {7'b0110111};
             bins auipc  = {7'b0010111};
-            bins other  = default;
         }
 
-        // Campo funct3 distingue operaciones dentro de tipo R/I.
+        // Formato decodificado a partir del opcode.
+        cp_instr_format: coverpoint instr_format {
+            bins r_format = {2'd0};
+            bins i_format = {2'd1};
+            bins u_format = {2'd2};
+        }
+
+        // Todas las variantes RV32I usadas en R e I.
         cp_funct3: coverpoint funct3 {
             bins f3_000 = {3'b000};
             bins f3_001 = {3'b001};
@@ -37,55 +45,53 @@ class riscv_subscriber extends uvm_subscriber #(riscv_transaction);
             bins f3_111 = {3'b111};
         }
 
-        // Campo funct7 separa ADD/SUB y SRL/SRA, ademas de shifts I.
+        // Diferencia ADD/SUB y SRL/SRA.
         cp_funct7: coverpoint funct7 {
             bins f7_0000000 = {7'b0000000};
             bins f7_0100000 = {7'b0100000};
-            bins other      = default;
         }
 
-        // Registros RV32E usados como destino.
+        // Registros destino.
         cp_rd: coverpoint rd {
-            bins x0 = {5'd0};
             bins rv32e_regs[] = {[5'd1:5'd15]};
-            bins rv32i_upper[] = {[5'd16:5'd31]};
         }
 
-        // Registros RV32E usados como fuente 1.
+        // Fuente 1.
         cp_rs1: coverpoint rs1 {
             bins x0 = {5'd0};
             bins rv32e_regs[] = {[5'd1:5'd15]};
-            bins rv32i_upper[] = {[5'd16:5'd31]};
         }
 
-        // Registros RV32E usados como fuente 2 o shamt codificado.
+        // Fuente 2.
         cp_rs2: coverpoint rs2 {
             bins x0 = {5'd0};
             bins rv32e_regs[] = {[5'd1:5'd15]};
-            bins rv32i_upper[] = {[5'd16:5'd31]};
         }
 
-        // Confirma que el monitor esta muestreando writebacks reales.
+        // Inmediato superior usado por LUI/AUIPC.
+        cp_imm_u: coverpoint imm_u {
+            bins zero = {20'h00000};
+            bins low  = {[20'h00001:20'h000ff]};
+            bins mid  = {[20'h00100:20'h00fff]};
+            bins high = {[20'h01000:20'hfffff]};
+        }
+
+        // Verifica writeback.
         cp_reg_write: coverpoint reg_write {
-            bins no_write = {1'b0};
-            bins write    = {1'b1};
+            bins write = {1'b1};
         }
 
-        // Estado de halt observado junto con el writeback.
-        cp_hlt: coverpoint hlt {
-            bins running = {1'b0};
-            bins halted  = {1'b1};
+        // Cruces principales. LUI/AUIPC no usan funct3/funct7 de forma semantica.
+        cross_opcode_funct3 : cross cp_opcode, cp_funct3 {
+            ignore_bins u_no_funct3 = binsof(cp_opcode) intersect {7'b0110111, 7'b0010111};
         }
 
-        // Bits de debug expuestos por darkriscv/darksocv.
-        cp_debug: coverpoint debug {
-            bins values[] = {[4'h0:4'hF]};
+        cross_opcode_funct7 : cross cp_opcode, cp_funct7 {
+            ignore_bins u_no_funct7 = binsof(cp_opcode) intersect {7'b0110111, 7'b0010111};
         }
 
-        // Cruces funcionales principales para instrucciones observadas.
-        cross_opcode_rd: cross cp_opcode, cp_rd;
-        cross_opcode_funct3: cross cp_opcode, cp_funct3;
-        cross_opcode_reg_write: cross cp_opcode, cp_reg_write;
+        cross_opcode_reg_write : cross cp_opcode, cp_reg_write;
+
     endgroup
 
     function new(string name = "riscv_subscriber", uvm_component parent = null);
@@ -103,21 +109,32 @@ class riscv_subscriber extends uvm_subscriber #(riscv_transaction);
         rs2       = t.rs2;
         funct3    = t.instr[14:12];
         funct7    = t.instr[31:25];
+        imm_u     = t.instr[31:12];
         reg_write = t.reg_write;
         hlt       = t.hlt;
         debug     = t.debug;
+
+        case (opcode)
+            7'b0110011: instr_format = 2'd0;
+            7'b0010011: instr_format = 2'd1;
+            7'b0110111,
+            7'b0010111: instr_format = 2'd2;
+            default:    instr_format = 2'd3;
+        endcase
 
         riscv_cg.sample();
 
         `uvm_info(
             get_type_name(),
-            $sformatf("SUBSCRIBER_SAMPLE count=%0d PC=%08h INSTR=%08h opcode=%07b funct3=%03b funct7=%07b rd=x%0d rs1=x%0d rs2=x%0d WE=%0b HLT=%0b coverage=%0.2f%%",
+            $sformatf("SUBSCRIBER_SAMPLE count=%0d PC=%08h INSTR=%08h opcode=%07b format=%0d funct3=%03b funct7=%07b imm_u=%05h rd=x%0d rs1=x%0d rs2=x%0d WE=%0b HLT=%0b coverage=%0.2f%%",
                       sample_count,
                       t.pc,
                       t.instr,
                       opcode,
+                      instr_format,
                       funct3,
                       funct7,
+                      imm_u,
                       rd,
                       rs1,
                       rs2,

@@ -26,6 +26,8 @@ class riscv_scoreboard extends uvm_scoreboard;
 
     int pass_count;
     int fail_count;
+    string fail_summary[$];
+    bit summary_printed;
 
     function new(string name = "riscv_scoreboard", uvm_component parent = null);
         super.new(name, parent);
@@ -55,6 +57,14 @@ class riscv_scoreboard extends uvm_scoreboard;
 
         pass_count = 0;
         fail_count = 0;
+        fail_summary.delete();
+        summary_printed = 1'b0;
+    endfunction
+
+    function void record_fail(string fail_msg);
+        fail_count++;
+        fail_summary.push_back(fail_msg);
+        `uvm_error(get_type_name(), fail_msg)
     endfunction
 
     // Equivalente a: imon2scb.get(instr_tr)
@@ -93,17 +103,15 @@ class riscv_scoreboard extends uvm_scoreboard;
     virtual function void write_actual(riscv_transaction actual_tr);
         riscv_transaction expected_tr;
         string op_name;
+        string fail_msg;
 
         if (expected_q.size() == 0) begin
-            `uvm_error(
-                get_type_name(),
-                $sformatf("Writeback inesperado del DUT PC=%08h INSTR=%08h RD=x%0d WDATA=%0d",
-                          actual_tr.pc,
-                          actual_tr.instr,
-                          actual_tr.rd,
-                          $signed(actual_tr.wdata))
-            )
-            fail_count++;
+            fail_msg = $sformatf("Writeback inesperado del DUT PC=%08h INSTR=%08h RD=x%0d WDATA=%0d",
+                                 actual_tr.pc,
+                                 actual_tr.instr,
+                                 actual_tr.rd,
+                                 $signed(actual_tr.wdata));
+            record_fail(fail_msg);
             return;
         end
 
@@ -111,37 +119,28 @@ class riscv_scoreboard extends uvm_scoreboard;
         op_name = get_op_name(expected_tr.instr);
 
         if (actual_tr.pc !== expected_tr.pc) begin
-            `uvm_error(
-                get_type_name(),
-                $sformatf("FAIL OP=%s DUT_PC=%08h EXPECTED_PC=%08h -> PC INCORRECTO",
-                          op_name,
-                          actual_tr.pc,
-                          expected_tr.pc)
-            )
-            fail_count++;
+            fail_msg = $sformatf("FAIL OP=%s DUT_PC=%08h EXPECTED_PC=%08h -> PC INCORRECTO",
+                                 op_name,
+                                 actual_tr.pc,
+                                 expected_tr.pc);
+            record_fail(fail_msg);
         end
         else if (actual_tr.rd !== expected_tr.rd) begin
-            `uvm_error(
-                get_type_name(),
-                $sformatf("FAIL OP=%s PC=%08h DUT_RD=x%0d EXPECTED_RD=x%0d -> REGISTRO DESTINO INCORRECTO",
-                          op_name,
-                          actual_tr.pc,
-                          actual_tr.rd,
-                          expected_tr.rd)
-            )
-            fail_count++;
+            fail_msg = $sformatf("FAIL OP=%s PC=%08h DUT_RD=x%0d EXPECTED_RD=x%0d -> REGISTRO DESTINO INCORRECTO",
+                                 op_name,
+                                 actual_tr.pc,
+                                 actual_tr.rd,
+                                 expected_tr.rd);
+            record_fail(fail_msg);
         end
         else if (actual_tr.wdata !== expected_tr.wdata) begin
-            `uvm_error(
-                get_type_name(),
-                $sformatf("FAIL OP=%s PC=%08h RD=x%0d DUT=%0d EXPECTED=%0d -> INCORRECTO",
-                          op_name,
-                          actual_tr.pc,
-                          actual_tr.rd,
-                          $signed(actual_tr.wdata),
-                          $signed(expected_tr.wdata))
-            )
-            fail_count++;
+            fail_msg = $sformatf("FAIL OP=%s PC=%08h RD=x%0d DUT=%0d EXPECTED=%0d -> INCORRECTO",
+                                 op_name,
+                                 actual_tr.pc,
+                                 actual_tr.rd,
+                                 $signed(actual_tr.wdata),
+                                 $signed(expected_tr.wdata));
+            record_fail(fail_msg);
         end
         else begin
             `uvm_info(
@@ -170,9 +169,8 @@ class riscv_scoreboard extends uvm_scoreboard;
         logic [31:0] rs1_val;
         logic [31:0] rs2_val;
         logic [31:0] imm_i;
-        logic signed [31:0] s_rs1;
-
         logic [31:0] imm_u;
+        logic signed [31:0] s_rs1;
 
         opcode = tr.instr[6:0];
         rd     = tr.instr[11:7];
@@ -197,25 +195,11 @@ class riscv_scoreboard extends uvm_scoreboard;
         expected_imm = 32'h00000000;
         expected_uses_imm = 1'b0;
 
-        imm_i = {{20{tr.instr[31]}}, tr.instr[31:20]};
-        imm_u = {tr.instr[31:12], 12'b0};
-
         case (opcode)
-            7'b0110111: begin
-    					expected_op = "LUI";
-    					expected_uses_imm = 1'b1;
-    					expected_imm = imm_u;
-    					expected_wdata = imm_u;
-			end
-
-			7'b0010111: begin
-    					expected_op = "AUIPC";
-    					expected_uses_imm = 1'b1;
-    					expected_imm = imm_u;
-   						expected_wdata = tr.pc + imm_u;
-			end
 
             7'b0010011: begin
+                imm_i = {{20{tr.instr[31]}}, tr.instr[31:20]};
+
                 case (funct3)
                     3'b000: begin
                         expected_op = "ADDI";
@@ -349,6 +333,24 @@ class riscv_scoreboard extends uvm_scoreboard;
                 endcase
             end
 
+            7'b0110111: begin
+                imm_u = {tr.instr[31:12], 12'h000};
+
+                expected_op = "LUI";
+                expected_uses_imm = 1'b1;
+                expected_imm = imm_u;
+                expected_wdata = imm_u;
+            end
+
+            7'b0010111: begin
+                imm_u = {tr.instr[31:12], 12'h000};
+
+                expected_op = "AUIPC";
+                expected_uses_imm = 1'b1;
+                expected_imm = imm_u;
+                expected_wdata = tr.pc + imm_u;
+            end
+
             default: begin
                 expected_valid = 1'b0;
             end
@@ -445,17 +447,50 @@ class riscv_scoreboard extends uvm_scoreboard;
             end
 
             7'b0110111: return "LUI";
-			7'b0010111: return "AUIPC";
+            7'b0010111: return "AUIPC";
 
             default: return "UNKNOWN";
         endcase
     endfunction
 
-    virtual function void report_phase(uvm_phase phase);
+    function void print_fail_summary(string source = "FINAL");
+        if (summary_printed) begin
+            return;
+        end
+
+        summary_printed = 1'b1;
+
         `uvm_info(get_type_name(), "================ SCOREBOARD REPORT ================", UVM_LOW)
+        `uvm_info(get_type_name(), $sformatf("SOURCE: %s", source), UVM_LOW)
         `uvm_info(get_type_name(), $sformatf("PASS: %0d", pass_count), UVM_LOW)
         `uvm_info(get_type_name(), $sformatf("FAIL: %0d", fail_count), UVM_LOW)
+        `uvm_info(get_type_name(), "================ FAIL SUMMARY =====================", UVM_LOW)
+
+        if (fail_summary.size() == 0) begin
+            `uvm_info(get_type_name(), "No se registraron fails funcionales.", UVM_LOW)
+        end else begin
+            foreach (fail_summary[i]) begin
+                `uvm_info(
+                    get_type_name(),
+                    $sformatf("FAIL[%0d]: %s", i, fail_summary[i]),
+                    UVM_LOW
+                )
+            end
+        end
+
+        if (expected_q.size() != 0) begin
+            `uvm_warning(
+                get_type_name(),
+                $sformatf("Quedaron %0d resultados esperados sin comparar. Puede faltar tiempo de simulacion.",
+                          expected_q.size())
+            )
+        end
+
         `uvm_info(get_type_name(), "===================================================", UVM_LOW)
+    endfunction
+
+    virtual function void report_phase(uvm_phase phase);
+        print_fail_summary("UVM report_phase");
     endfunction
 
 endclass

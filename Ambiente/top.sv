@@ -61,6 +61,7 @@ module top();
         ifc_darksocv_obj.debug = dut.KDEBUG;
         ifc_darksocv_obj.core_reset = dut.core0.XRES;
         ifc_darksocv_obj.hlt = dut.HLT;
+        ifc_darksocv_obj.finish_req = dut.FINISH_REQ;
     end
 
     initial begin

@@ -4,7 +4,7 @@ class riscv_driver extends uvm_driver #(riscv_transaction);
 
     `uvm_component_utils(riscv_driver)
 
-    localparam int PROGRAM_SIZE = 55;
+    localparam int PROGRAM_SIZE = 95;
 
     virtual ifc_darksocv ifc_darksocv_obj;
   
@@ -34,7 +34,12 @@ class riscv_driver extends uvm_driver #(riscv_transaction);
 
         phase.raise_objection(this);
 
-        `uvm_info(get_type_name(), "Driver: recibiendo programa aleatorio tipo R/tipo I", UVM_MEDIUM)
+        `uvm_info(
+            get_type_name(),
+            $sformatf("Driver: recibiendo programa aleatorio tipo R/tipo I/tipo U, PROGRAM_SIZE=%0d",
+                      PROGRAM_SIZE),
+            UVM_MEDIUM
+        )
 
         instructions.delete();
 
