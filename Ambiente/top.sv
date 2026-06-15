@@ -1,4 +1,7 @@
 module top();
+
+    import uvm_pkg::*;
+
     logic clk;
 
     wire uart_tx;
@@ -16,9 +19,9 @@ module top();
     end
 
     ifc_darksocv ifc_darksocv_obj(clk);
-  	darksocv_checkers checkers_obj(ifc_darksocv_obj);
-
-    // DUT principal del proyecto.
+    darksocv_checkers checkers_obj(ifc_darksocv_obj);
+  
+	// DUT principal del proyecto.
     darksocv dut(
         .XCLK(clk),
         .XRES(ifc_darksocv_obj.reset),
@@ -28,7 +31,7 @@ module top();
         .DEBUG(debug)
     );
 
-    // Conexion jerarquica de senales observables para el monitor.
+  	// Conexion jerarquica de senales observables para el monitor.
     always_comb begin
         ifc_darksocv_obj.pc = dut.core0.PC;
         ifc_darksocv_obj.instr = dut.core0.XIDATA;
@@ -58,8 +61,21 @@ module top();
         ifc_darksocv_obj.debug = dut.KDEBUG;
         ifc_darksocv_obj.core_reset = dut.core0.XRES;
         ifc_darksocv_obj.hlt = dut.HLT;
+        ifc_darksocv_obj.finish_req = dut.FINISH_REQ;
     end
 
-    // Test case.
-    testcase test(ifc_darksocv_obj);
+    initial begin
+        $dumpfile("dump.vcd");
+        $dumpvars(0, top);
+
+        uvm_config_db #(virtual ifc_darksocv)::set(
+            null,
+            "",
+            "ifc_darksocv_obj",
+            ifc_darksocv_obj
+        );
+
+        run_test("base_test");
+    end
+
 endmodule

@@ -1,28 +1,32 @@
-class monitor;
+class riscv_monitor extends uvm_monitor;
+
+    `uvm_component_utils(riscv_monitor)
 
     virtual ifc_darksocv ifc_darksocv_obj;
-    mailbox #(transaction) mon2scb;
+
+    uvm_analysis_port #(riscv_transaction) mon2scb_port;
+    uvm_analysis_port #(riscv_transaction) mon2sub_port;
 
     int cycle_count;
-    logic [31:0] last_pc;
-    logic [31:0] last_instr;
-    logic        last_reset;
-    logic        last_core_reset;
 
-    function new(virtual ifc_darksocv ifc_darksocv_obj,
-                 mailbox #(transaction) mon2scb);
-        this.ifc_darksocv_obj = ifc_darksocv_obj;
-        this.mon2scb = mon2scb;
+    function new(string name = "riscv_monitor", uvm_component parent = null);
+        super.new(name, parent);
+    endfunction
+
+    virtual function void build_phase(uvm_phase phase);
+        super.build_phase(phase);
+
+        mon2scb_port = new("mon2scb_port", this);
+        mon2sub_port = new("mon2sub_port", this);
+
+        if (!uvm_config_db #(virtual ifc_darksocv)::get(this, "", "ifc_darksocv_obj", ifc_darksocv_obj)) begin
+            `uvm_fatal(get_type_name(), "No se encontro la interfaz virtual ifc_darksocv_obj")
+        end
 
         cycle_count = 0;
-        last_pc = 32'hFFFF_FFFF;
-        last_instr = 32'hFFFF_FFFF;
-        last_reset = 1'b1;
-        last_core_reset = 1'b1;
     endfunction
 
     function string get_op_name(logic [31:0] instr);
-
         logic [6:0] opcode;
         logic [6:0] funct7;
         logic [2:0] funct3;
@@ -40,18 +44,12 @@ class monitor;
                     3'b100: return "XORI";
                     3'b110: return "ORI";
                     3'b111: return "ANDI";
-
-                    3'b001: begin
-                      if (funct7 == 7'b0000000) return "SLLI";
-                        else return "UNKNOWN";
-                    end
-
+                    3'b001: return (funct7 == 7'b0000000) ? "SLLI" : "UNKNOWN";
                     3'b101: begin
-                      if (funct7 == 7'b0000000) return "SRLI";
-                      else if (funct7 == 7'b0100000) return "SRAI";
+                        if (funct7 == 7'b0000000) return "SRLI";
+                        else if (funct7 == 7'b0100000) return "SRAI";
                         else return "UNKNOWN";
                     end
-
                     default: return "UNKNOWN";
                 endcase
             end
@@ -72,91 +70,52 @@ class monitor;
                 endcase
             end
 
+            7'b0110111: return "LUI";
+            7'b0010111: return "AUIPC";
+
             default: return "UNKNOWN";
         endcase
-
     endfunction
 
-    function bit instr_has_rd(logic [31:0] instr);
-
-        logic [6:0] opcode;
-
-        opcode = instr[6:0];
-
-        case (opcode)
-            7'b0010011: return 1'b1; // ADDI
-            7'b0110011: return 1'b1; // Tipo R
-            default:    return 1'b0;
-        endcase
-
-    endfunction
-
-    function logic [4:0] get_instr_rd(logic [31:0] instr);
-        return instr[11:7];
-    endfunction
-
-    task run();
-        transaction tr;
+    virtual task run_phase(uvm_phase phase);
+        riscv_transaction tr;
 
         forever begin
             @(posedge ifc_darksocv_obj.clk);
             cycle_count++;
 
-            if (ifc_darksocv_obj.reset == 1'b1) begin
-                if ((cycle_count <= 3) || (cycle_count % 5 == 0)) begin
-                    $display("[MONITOR] DUT en reset, ciclo=%0d, tiempo=%0t",
-                             cycle_count, $time);
-                end
-            end else begin
-                if (last_reset == 1'b1) begin
-                    $display("[MONITOR] reset liberado en tiempo=%0t", $time);
-                end
+            if (!ifc_darksocv_obj.reset &&
+                !ifc_darksocv_obj.core_reset &&
+                ifc_darksocv_obj.reg_write) begin
 
-                if ((last_core_reset == 1'b1) &&
-                    (ifc_darksocv_obj.core_reset == 1'b0)) begin
-                    $display("[MONITOR] core darkriscv salio de reset en tiempo=%0t", $time);
-                end
+                tr = riscv_transaction::type_id::create("tr");
 
-                if (ifc_darksocv_obj.reg_write == 1'b1) begin
-                    tr = new();
+                tr.cycle     = cycle_count;
+                tr.pc        = ifc_darksocv_obj.pc;
+                tr.instr     = ifc_darksocv_obj.instr;
+                tr.rd        = ifc_darksocv_obj.rd;
+                tr.rs1       = ifc_darksocv_obj.instr[19:15];
+                tr.rs2       = ifc_darksocv_obj.instr[24:20];
+                tr.wdata     = ifc_darksocv_obj.wdata;
+                tr.reg_write = ifc_darksocv_obj.reg_write;
+                tr.hlt       = ifc_darksocv_obj.hlt;
+                tr.debug     = ifc_darksocv_obj.debug;
 
-                    tr.cycle     = cycle_count;
-                    tr.pc        = ifc_darksocv_obj.pc;
-                    tr.instr     = ifc_darksocv_obj.instr;
-                    tr.rd        = ifc_darksocv_obj.rd;
-                    tr.wdata     = ifc_darksocv_obj.wdata;
-                    tr.reg_write = ifc_darksocv_obj.reg_write;
-                    tr.hlt       = ifc_darksocv_obj.hlt;
-                    tr.debug     = ifc_darksocv_obj.debug;
+                `uvm_info(
+                    get_type_name(),
+                    $sformatf("OBSERVADO ciclo=%0d PC=%08h INSTR=%08h OP=%s RD=x%0d WDATA=%0d",
+                              tr.cycle,
+                              tr.pc,
+                              tr.instr,
+                              get_op_name(tr.instr),
+                              tr.rd,
+                              $signed(tr.wdata)),
+                    UVM_MEDIUM
+                )
 
-                    $display("[MONITOR] OBSERVADO ciclo=%0d PC=%08h INSTR=%08h OP=%s RD=x%0d DUT_WDATA=%0d WE=%0b HLT=%0b DBG=%0b",
-                             cycle_count,
-                             ifc_darksocv_obj.pc,
-                             ifc_darksocv_obj.instr,
-                             get_op_name(ifc_darksocv_obj.instr),
-                             ifc_darksocv_obj.rd,
-                             $signed(ifc_darksocv_obj.wdata),
-                             ifc_darksocv_obj.reg_write,
-                             ifc_darksocv_obj.hlt,
-                             ifc_darksocv_obj.debug);
-
-                    mon2scb.put(tr);
-                end
-                else if (instr_has_rd(ifc_darksocv_obj.instr) &&
-                         (get_instr_rd(ifc_darksocv_obj.instr) == 5'd0)) begin
-                    $display("[MONITOR] OBSERVADO ciclo=%0d PC=%08h INSTR=%08h OP=%s RD=x0 WE=%0b -> rd=0; x0 no genera escritura arquitectonica",
-                             cycle_count,
-                             ifc_darksocv_obj.pc,
-                             ifc_darksocv_obj.instr,
-                             get_op_name(ifc_darksocv_obj.instr),
-                             ifc_darksocv_obj.reg_write);
-                end
+                mon2scb_port.write(tr);
+                mon2sub_port.write(tr);
             end
-
-            last_pc = ifc_darksocv_obj.pc;
-            last_instr = ifc_darksocv_obj.instr;
-            last_reset = ifc_darksocv_obj.reset;
-            last_core_reset = ifc_darksocv_obj.core_reset;
         end
     endtask
 
