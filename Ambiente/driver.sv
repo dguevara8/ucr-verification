@@ -4,11 +4,10 @@ class riscv_driver extends uvm_driver #(riscv_transaction);
 
     `uvm_component_utils(riscv_driver)
 
-    localparam int PROGRAM_SIZE = 95;
+    localparam int PROGRAM_SIZE = 400;
 
     virtual ifc_darksocv ifc_darksocv_obj;
-  
-    // En UVM traducimos mailbox a analysis_port para enviar instrucciones esperadas al scoreboard/premonitor.
+
     uvm_analysis_port #(riscv_transaction) drv2imon_port;
 
     logic [31:0] instructions[$];
@@ -36,8 +35,7 @@ class riscv_driver extends uvm_driver #(riscv_transaction);
 
         `uvm_info(
             get_type_name(),
-            $sformatf("Driver: recibiendo programa aleatorio tipo R/tipo I/tipo U, PROGRAM_SIZE=%0d",
-                      PROGRAM_SIZE),
+            $sformatf("Driver: recibiendo programa generado, PROGRAM_SIZE=%0d", PROGRAM_SIZE),
             UVM_MEDIUM
         )
 
@@ -47,8 +45,7 @@ class riscv_driver extends uvm_driver #(riscv_transaction);
             seq_item_port.get_next_item(tr);
 
             instructions.push_back(tr.instr);
-
-            publish_instruction_to_instruction_monitor(tr);
+            publish_instruction_to_scoreboard(tr);
 
             `uvm_info(
                 get_type_name(),
@@ -71,20 +68,28 @@ class riscv_driver extends uvm_driver #(riscv_transaction);
         phase.drop_objection(this);
     endtask
 
-    // Equivalente a drv2imon.put(tr)
-    task publish_instruction_to_instruction_monitor(riscv_transaction tr);
+    task publish_instruction_to_scoreboard(riscv_transaction tr);
         riscv_transaction tr_copy;
 
         tr_copy = riscv_transaction::type_id::create("tr_copy");
 
-        tr_copy.cycle     = tr.cycle;
-        tr_copy.pc        = tr.pc;
-        tr_copy.instr     = tr.instr;
-        tr_copy.rd        = tr.rd;
-        tr_copy.wdata     = 32'h00000000;
-        tr_copy.reg_write = 1'b0;
-        tr_copy.hlt       = 1'b0;
-        tr_copy.debug     = 4'h0;
+        tr_copy.cycle        = tr.cycle;
+        tr_copy.pc           = tr.pc;
+        tr_copy.instr        = tr.instr;
+        tr_copy.rd           = tr.rd;
+        tr_copy.rs1          = tr.rs1;
+        tr_copy.rs2          = tr.rs2;
+        tr_copy.wdata        = 32'h00000000;
+        tr_copy.addr         = 32'h00000000;
+        tr_copy.store_data   = 32'h00000000;
+        tr_copy.next_pc      = 32'h00000000;
+        tr_copy.reg_write    = 1'b0;
+        tr_copy.mem_read     = 1'b0;
+        tr_copy.mem_write    = 1'b0;
+        tr_copy.branch_taken = 1'b0;
+        tr_copy.jump_taken   = 1'b0;
+        tr_copy.hlt          = 1'b0;
+        tr_copy.debug        = 4'h0;
 
         drv2imon_port.write(tr_copy);
     endtask
@@ -133,16 +138,13 @@ class riscv_driver extends uvm_driver #(riscv_transaction);
 
     task load_mem_file();
         `uvm_info(get_type_name(), "Cargando darksocv.mem en top.dut.MEM", UVM_LOW)
-
         $readmemh("darksocv.mem", top.dut.MEM, 0);
     endtask
 
     task print_dut_mem();
-        int i;
-
         `uvm_info(get_type_name(), "Contenido cargado en top.dut.MEM:", UVM_LOW)
 
-        for (i = 0; i < instructions.size(); i++) begin
+        for (int i = 0; i < instructions.size(); i++) begin
             `uvm_info(
                 get_type_name(),
                 $sformatf("MEM[%0d] = %08h", i, top.dut.MEM[i]),
@@ -157,7 +159,6 @@ class riscv_driver extends uvm_driver #(riscv_transaction);
         ifc_darksocv_obj.reset = 1'b1;
 
         @(posedge ifc_darksocv_obj.clk);
-
         repeat (10) @(posedge ifc_darksocv_obj.clk);
 
         `uvm_info(get_type_name(), "Liberando reset", UVM_LOW)

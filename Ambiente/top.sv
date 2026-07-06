@@ -3,6 +3,8 @@ module top();
     import uvm_pkg::*;
 
     logic clk;
+    string selected_test;
+    real clock_half_period_ns = 5.0;
 
     wire uart_tx;
     wire uart_rx;
@@ -14,14 +16,23 @@ module top();
     initial begin
         clk = 1'b0;
         forever begin
-            #5 clk = ~clk;
+            #(clock_half_period_ns) clk = ~clk;
         end
     end
 
+    task set_clock_period_ns(real period_ns);
+        if (period_ns <= 0.0) begin
+            `uvm_error("top", $sformatf("Periodo de reloj invalido: %0f ns", period_ns))
+        end else begin
+            clock_half_period_ns = period_ns / 2.0;
+            `uvm_info("top", $sformatf("Clock period configurado a %0f ns", period_ns), UVM_LOW)
+        end
+    endtask
+
     ifc_darksocv ifc_darksocv_obj(clk);
     darksocv_checkers checkers_obj(ifc_darksocv_obj);
-  
-	// DUT principal del proyecto.
+
+    // DUT principal del proyecto.
     darksocv dut(
         .XCLK(clk),
         .XRES(ifc_darksocv_obj.reset),
@@ -31,7 +42,7 @@ module top();
         .DEBUG(debug)
     );
 
-  	// Conexion jerarquica de senales observables para el monitor.
+    // Conexion jerarquica de senales observables para el monitor.
     always_comb begin
         ifc_darksocv_obj.pc = dut.core0.PC;
         ifc_darksocv_obj.instr = dut.core0.XIDATA;
@@ -58,6 +69,16 @@ module top();
             ifc_darksocv_obj.wdata = 32'h00000000;
         end
 
+        ifc_darksocv_obj.addr = dut.core0.DADDR;
+        ifc_darksocv_obj.store_data = dut.core0.DATAO;
+        ifc_darksocv_obj.next_pc = dut.core0.NXPC;
+        ifc_darksocv_obj.mem_read = dut.core0.LCC && !dut.HLT;
+        ifc_darksocv_obj.mem_write = dut.core0.SCC && !dut.HLT;
+        ifc_darksocv_obj.is_branch = dut.core0.BCC && !dut.HLT;
+        ifc_darksocv_obj.is_jump = (dut.core0.JAL || dut.core0.JALR) && !dut.HLT;
+        ifc_darksocv_obj.branch_taken = dut.core0.BCC && dut.core0.JREQ && !dut.HLT;
+        ifc_darksocv_obj.jump_taken = (dut.core0.JAL || dut.core0.JALR) && dut.core0.JREQ && !dut.HLT;
+
         ifc_darksocv_obj.debug = dut.KDEBUG;
         ifc_darksocv_obj.core_reset = dut.core0.XRES;
         ifc_darksocv_obj.hlt = dut.HLT;
@@ -75,7 +96,11 @@ module top();
             ifc_darksocv_obj
         );
 
-        run_test("base_test");
+        if ($value$plusargs("UVM_TESTNAME=%s", selected_test)) begin
+            run_test();
+        end else begin
+            run_test("base_test");
+        end
     end
 
 endmodule

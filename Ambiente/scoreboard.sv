@@ -11,6 +11,7 @@ class riscv_scoreboard extends uvm_scoreboard;
     riscv_transaction expected_q[$];
 
     logic [31:0] reg_model [32];
+    logic [31:0] mem_model [0:255];
 
     logic [4:0]  expected_rd;
     logic [31:0] expected_wdata;
@@ -41,6 +42,10 @@ class riscv_scoreboard extends uvm_scoreboard;
 
         foreach (reg_model[i]) begin
             reg_model[i] = 32'h00000000;
+        end
+
+        foreach (mem_model[i]) begin
+            mem_model[i] = 32'h00000000;
         end
 
         expected_rd = 5'd0;
@@ -169,7 +174,11 @@ class riscv_scoreboard extends uvm_scoreboard;
         logic [31:0] rs1_val;
         logic [31:0] rs2_val;
         logic [31:0] imm_i;
+        logic [31:0] imm_s;
+        logic [31:0] imm_b;
+        logic [31:0] imm_j;
         logic [31:0] imm_u;
+        logic [31:0] addr;
         logic signed [31:0] s_rs1;
 
         opcode = tr.instr[6:0];
@@ -351,6 +360,75 @@ class riscv_scoreboard extends uvm_scoreboard;
                 expected_wdata = tr.pc + imm_u;
             end
 
+            7'b0000011: begin
+                imm_i = {{20{tr.instr[31]}}, tr.instr[31:20]};
+                addr = rs1_val + imm_i;
+
+                if (funct3 == 3'b010) begin
+                    expected_op = "LW";
+                    expected_uses_imm = 1'b1;
+                    expected_imm = imm_i;
+                    expected_wdata = mem_model[addr[9:2]];
+                end else begin
+                    expected_valid = 1'b0;
+                end
+            end
+
+            7'b0100011: begin
+                imm_s = {{20{tr.instr[31]}}, tr.instr[31:25], tr.instr[11:7]};
+                addr = rs1_val + imm_s;
+
+                if (funct3 == 3'b010) begin
+                    expected_op = "SW";
+                    expected_valid = 1'b0;
+                    mem_model[addr[9:2]] = rs2_val;
+                end else begin
+                    expected_valid = 1'b0;
+                end
+            end
+
+            7'b1100011: begin
+                imm_b = {{19{tr.instr[31]}}, tr.instr[31], tr.instr[7],
+                         tr.instr[30:25], tr.instr[11:8], 1'b0};
+                expected_valid = 1'b0;
+
+                case (funct3)
+                    3'b000: expected_op = "BEQ";
+                    3'b001: expected_op = "BNE";
+                    3'b100: expected_op = "BLT";
+                    3'b101: expected_op = "BGE";
+                    3'b110: expected_op = "BLTU";
+                    3'b111: expected_op = "BGEU";
+                    default: expected_op = "UNKNOWN";
+                endcase
+
+                expected_uses_imm = 1'b1;
+                expected_imm = imm_b;
+            end
+
+            7'b1101111: begin
+                imm_j = {{11{tr.instr[31]}}, tr.instr[31], tr.instr[19:12],
+                         tr.instr[20], tr.instr[30:21], 1'b0};
+
+                expected_op = "JAL";
+                expected_uses_imm = 1'b1;
+                expected_imm = imm_j;
+                expected_wdata = tr.pc + 32'd4;
+            end
+
+            7'b1100111: begin
+                imm_i = {{20{tr.instr[31]}}, tr.instr[31:20]};
+
+                if (funct3 == 3'b000) begin
+                    expected_op = "JALR";
+                    expected_uses_imm = 1'b1;
+                    expected_imm = imm_i;
+                    expected_wdata = tr.pc + 32'd4;
+                end else begin
+                    expected_valid = 1'b0;
+                end
+            end
+
             default: begin
                 expected_valid = 1'b0;
             end
@@ -448,6 +526,23 @@ class riscv_scoreboard extends uvm_scoreboard;
 
             7'b0110111: return "LUI";
             7'b0010111: return "AUIPC";
+            7'b0000011: return (funct3 == 3'b010) ? "LW" : "UNKNOWN";
+            7'b0100011: return (funct3 == 3'b010) ? "SW" : "UNKNOWN";
+
+            7'b1100011: begin
+                case (funct3)
+                    3'b000: return "BEQ";
+                    3'b001: return "BNE";
+                    3'b100: return "BLT";
+                    3'b101: return "BGE";
+                    3'b110: return "BLTU";
+                    3'b111: return "BGEU";
+                    default: return "UNKNOWN";
+                endcase
+            end
+
+            7'b1101111: return "JAL";
+            7'b1100111: return "JALR";
 
             default: return "UNKNOWN";
         endcase
